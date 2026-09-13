@@ -149,16 +149,16 @@ test("runCodex and Codex adapters honor web search, tools and usage", async () =
 		items = [{ type: "agent_message" }];
 		usage = undefined;
 		response = '{"ok":true}';
-		const llm = new CodexLlm("gpt-5.6-terra");
+		const llm = new CodexLlm();
 		const result = await llm.complete(
 			"scope",
 			JSON.stringify({ items: [] }),
 			signal,
 		);
 		expect(result.usage).toBeNull();
-		expect(receivedThread.model).toBe("gpt-5.6-terra");
+		expect(receivedThread.model).toBe("gpt-5.6-luna");
 		expect(receivedThread.modelReasoningEffort).toBe("low");
-		expect(result.audit.model).toBe("gpt-5.6-terra");
+		expect(result.audit.model).toBe("gpt-5.6-luna");
 		expect(receivedConfig.mcp_servers).toEqual({ foo: { enabled: false } });
 		expect(receivedConfig.plugins).toEqual({ sample: { enabled: false } });
 		expect(receivedConfig.features).toMatchObject({
@@ -229,22 +229,4 @@ test("navigation schema only permits unread source IDs and removes read when exh
 	const text = JSON.stringify(withUnread);
 	expect(text).toContain('"enum":["unread"]');
 	expect(JSON.stringify(without)).not.toContain('"const":"read"');
-});
-
-test("incremental writing schema cannot replace the entire draft", () => {
-	const schema = groundedSchema(
-		"deliverable_step",
-		JSON.stringify({
-			incrementalUpdate: true,
-			draft: { sections: [], knowledge: [] },
-			newContent: { sourceId: "s" },
-		}),
-	) as unknown as {
-		properties: {
-			draft: { type: string };
-			update: { properties: { replaceSections: unknown } };
-		};
-	};
-	expect(schema.properties.draft.type).toBe("null");
-	expect(schema.properties.update.properties.replaceSections).toBeDefined();
 });

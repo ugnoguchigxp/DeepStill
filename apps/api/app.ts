@@ -1,4 +1,3 @@
-import { configuredCodexModel } from "../../packages/llm-provider/codex";
 import { skillMarkdown } from "../../packages/research/deliverables";
 import { sourceIndex, readSourceRange } from "../../packages/memory/source";
 import {
@@ -83,7 +82,7 @@ export function createApp(store: Store) {
 			llmProvider: process.env.LLM_PROVIDER || "compatible",
 			model:
 				process.env.LLM_PROVIDER === "codex"
-					? configuredCodexModel()
+					? "gpt-5.6-luna"
 					: process.env.LLM_MODEL,
 			reasoning: process.env.LLM_PROVIDER === "codex" ? "low" : null,
 			searchProvider:

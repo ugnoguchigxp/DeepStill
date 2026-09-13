@@ -5,10 +5,7 @@ import { Store } from "../../packages/db";
 import { Engine, mocks, type Providers } from "./engine";
 import { DataForSeo } from "../../packages/search-provider";
 import { liveCrawler } from "../../packages/crawler";
-import {
-	CodexLlm,
-	configuredCodexModel,
-} from "../../packages/llm-provider/codex";
+import { CodexLlm } from "../../packages/llm-provider/codex";
 import { CodexSearch } from "../../packages/search-provider/codex";
 import { CompatibleLlm } from "../../packages/llm-provider";
 import {
@@ -41,7 +38,7 @@ export function configuredProviders(job?: Job): Providers {
 		crawler: liveCrawler(),
 		llm:
 			(job?.config.llmProvider ?? process.env.LLM_PROVIDER) === "codex"
-				? new CodexLlm(String(job?.config.llmModel ?? configuredCodexModel()))
+				? new CodexLlm()
 				: new CompatibleLlm(
 						String(
 							job?.config.llmBaseUrl ??

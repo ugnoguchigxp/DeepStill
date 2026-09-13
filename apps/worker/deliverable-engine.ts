@@ -16,8 +16,6 @@ import { emptyBundle, memoryCandidates } from "../../packages/memory";
 import type { MemoryBundle } from "../../packages/memory/schema";
 import {
 	type Draft,
-	incrementalStepSchema,
-	applyDraftUpdate,
 	deliverableEpisodeSchema,
 	deliverableStepSchema,
 	materialize,
@@ -523,20 +521,7 @@ export class DeliverableEngine {
 					!recoveryExhausted &&
 					(!state.repair || state.repairKind === "navigation") &&
 					!job.config.deliveryReplay;
-				const incrementalUpdate =
-					job.mode === "live" && !navigationOnly && !job.config.deliveryReplay;
 				const input = JSON.stringify({
-					incrementalUpdate,
-					updateTargets: incrementalUpdate
-						? {
-								sections: Object.fromEntries(
-									state.draft.sections.map((s, i) => [`s${i}`, s.title]),
-								),
-								knowledge: Object.fromEntries(
-									state.draft.knowledge.map((k, i) => [`k${i}`, k.title]),
-								),
-							}
-						: undefined,
 					navigationOnly,
 					originalRequest: job.topic,
 					readableSourceIds: sources
@@ -597,6 +582,13 @@ export class DeliverableEngine {
 					recentActions: state.history.slice(-5),
 					lastSearch: state.lastSearch ?? null,
 					retrievalFailures: (state.failuresDetail ?? []).slice(-8),
+					newSearchCandidates: state.queue
+						.filter(
+							(q) =>
+								state.lastSearch?.newUrls.includes(q.url) &&
+								!state.attempted.includes(q.url),
+						)
+						.map((q) => q.url),
 					remainingTokens: job.budget.tokens - job.usage.tokens,
 					remainingInputTokens:
 						(job.budget.inputTokens ?? job.budget.tokens) -
@@ -658,18 +650,7 @@ export class DeliverableEngine {
 				);
 				state.sequence++;
 				try {
-					const raw = JSON.parse(r.text);
-					const parsed = incrementalUpdate
-						? (() => {
-								const step = incrementalStepSchema.parse(raw);
-								return {
-									draft: applyDraftUpdate(state.draft, step.update),
-									next: step.next,
-								};
-							})()
-						: deliverableStepSchema.parse(raw);
-					if (navigationOnly && parsed.draft !== null)
-						throw Error("NAVIGATION_CANNOT_REWRITE_DRAFT");
+					const parsed = deliverableStepSchema.parse(JSON.parse(r.text));
 					if (content && parsed.draft === null)
 						throw Error("READ_CONTENT_REQUIRES_DRAFT_UPDATE");
 					const output = { ...parsed, draft: parsed.draft ?? state.draft };
@@ -835,12 +816,7 @@ export class DeliverableEngine {
 				} catch (error) {
 					if (state.repair) {
 						end("invalid_deliverable");
-						save(() =>
-							this.store.event(job.id, "deliverable.invalid", {
-								reason: String(error).slice(0, 1000),
-								terminal: true,
-							}),
-						);
+						save();
 						return;
 					}
 					state.repair = String(error).slice(0, 1000);

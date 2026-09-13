@@ -1,6 +1,6 @@
 import {
 	deliverableInstructions,
-	stepInstructions,
+	navigationInstructions,
 } from "../research/deliverable-prompts";
 import { evidenceContract } from "./contracts";
 export { evidenceContract } from "./contracts";
@@ -77,8 +77,8 @@ export function prompt(key: PromptKind, source: string) {
 		source,
 	});
 	const system =
-		key === "deliverable_step"
-			? `${evidenceContract}\n${stepInstructions(JSON.parse(source))}`
+		key === "deliverable_step" && JSON.parse(source).navigationOnly
+			? `${evidenceContract}\n${navigationInstructions}`
 			: systemInstructions(key);
 	return {
 		...compiled,

@@ -1,4 +1,3 @@
-import { configuredCodexModel } from "../llm-provider/codex";
 import { Database } from "bun:sqlite";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -201,12 +200,10 @@ export class Store {
 						input.mode === "mock"
 							? "fixture-v1"
 							: process.env.LLM_PROVIDER === "codex"
-								? configuredCodexModel()
+								? "gpt-5.6-luna"
 								: process.env.LLM_MODEL,
 					extractor: "llm-fetch@0.1.1",
-					promptVersion: "6",
-					deliverableUpdateMode:
-						input.mode === "live" ? "incremental-slots-v2" : "full-draft",
+					promptVersion: "5",
 					memoryVersion: process.env.MEMORY_FIRST_ENABLED === "0" ? 0 : 1,
 					researchControlVersion:
 						process.env.MEMORY_FIRST_ENABLED === "0" ? 1 : 2,

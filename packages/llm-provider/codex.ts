@@ -1,6 +1,5 @@
 import {
 	deliverableStepSchema,
-	incrementalSchemaFor,
 	draftSchema,
 	deliverableEpisodeSchema,
 } from "../research/deliverables";
@@ -56,11 +55,9 @@ export function groundedSchema(kind: PromptKind, input: string) {
 		const schema = z.toJSONSchema(
 			data.navigationOnly
 				? deliverableStepSchema.extend({ draft: z.null() })
-				: data.incrementalUpdate
-					? incrementalSchemaFor(data.draft)
-					: data.newContent
-						? deliverableStepSchema.extend({ draft: draftSchema })
-						: deliverableStepSchema,
+				: data.newContent
+					? deliverableStepSchema.extend({ draft: draftSchema })
+					: deliverableStepSchema,
 		);
 		const nextSchema = schema.properties?.next;
 		if (
@@ -347,14 +344,11 @@ export function groundedSchema(kind: PromptKind, input: string) {
 }
 export const CODEX_MODEL = "gpt-5.6-luna";
 export const CODEX_REASONING = "low";
-export const configuredCodexModel = () =>
-	process.env.CODEX_RESEARCH_MODEL?.trim() || CODEX_MODEL;
 /** Each call has a fresh, empty workspace and no inherited project instructions. */
 export async function runCodex(
 	input: string,
 	signal: AbortSignal,
 	options: {
-		model?: string;
 		web?: boolean;
 		schema?: unknown;
 		processorInstructions?: string;
@@ -414,7 +408,7 @@ export async function runCodex(
 			},
 		});
 		const thread = codex.startThread({
-			model: options.model ?? CODEX_MODEL,
+			model: CODEX_MODEL,
 			modelReasoningEffort: CODEX_REASONING,
 			workingDirectory: directory,
 			skipGitRepoCheck: true,
@@ -448,7 +442,7 @@ export async function runCodex(
 				: undefined,
 			audit: {
 				provider: "codex-sdk",
-				model: options.model ?? CODEX_MODEL,
+				model: CODEX_MODEL,
 				reasoning: CODEX_REASONING,
 				threadId: thread.id,
 				usage: turn.usage,
@@ -461,11 +455,9 @@ export async function runCodex(
 	}
 }
 export class CodexLlm implements LlmProvider {
-	constructor(private model = configuredCodexModel()) {}
 	async complete(kind: PromptKind, input: string, signal: AbortSignal) {
 		const invocation = prompt(kind, input);
 		const result = await runCodex(invocation.content.text, signal, {
-			model: this.model,
 			schema: groundedSchema(kind, input),
 			processorInstructions: invocation.system,
 		});
