@@ -1,3 +1,4 @@
+import { pdfEvidencePages, pdfEvidenceUrl, pdfReadNotice } from "../core/pdf";
 import {
 	existsSync,
 	mkdirSync,
@@ -97,7 +98,8 @@ export function exportArtifact(
 					const e = detail.evidence.find((e) => e.id === eid);
 					const s = detail.sources.find((s) => s.id === e?.snapshotId);
 					if (!e || !s) throw new Error("SOURCE_MISSING");
-					return `<blockquote id="evidence-${eid}">${escapeHtml(e.quote)}</blockquote><p>Snapshot: ${s.id} / UTF-16 [${e.start}, ${e.end}) / ${escapeHtml(s.fetchedAt)}</p><p><a href="${escapeHtml(s.finalUrl)}" rel="noreferrer">${escapeHtml(s.title || s.finalUrl)}</a></p><details><summary>取得時の本文</summary><pre>${escapeHtml(s.text)}</pre></details>`;
+					const pages = pdfEvidencePages(s, e.start, e.end);
+					return `<blockquote id="evidence-${eid}">${escapeHtml(e.quote)}</blockquote><p>Snapshot: ${s.id} / UTF-16 [${e.start}, ${e.end}) / ${escapeHtml(s.fetchedAt)}${pages.length ? ` / PDF p. ${pages.join(", ")}` : ""}</p>${s.pdf?.coverage ? `<p>${escapeHtml(pdfReadNotice(s.pdf))}</p>` : ""}<p><a href="${escapeHtml(pdfEvidenceUrl(s, e.start, e.end))}" rel="noreferrer">${escapeHtml(s.title || s.finalUrl)}</a></p><details><summary>取得時の本文</summary><pre>${escapeHtml(s.text)}</pre></details>`;
 				})
 				.join("")}</section>`;
 		})
@@ -109,11 +111,14 @@ export function exportArtifact(
 			narrativeMarkdown(artifact, detail),
 		);
 		writeFileSync(join(staging, "report.html"), content);
-  if (artifact.memoryId) {
-   const memory=detail.memory?.find(m=>m.id===artifact.memoryId);
-   if(!memory) throw new Error("ARTIFACT_MEMORY_MISSING");
-   writeFileSync(join(staging,"memory.json"),JSON.stringify(memory,null,2));
-  }
+		if (artifact.memoryId) {
+			const memory = detail.memory?.find((m) => m.id === artifact.memoryId);
+			if (!memory) throw new Error("ARTIFACT_MEMORY_MISSING");
+			writeFileSync(
+				join(staging, "memory.json"),
+				JSON.stringify(memory, null, 2),
+			);
+		}
 		writeFileSync(
 			join(staging, "evidence.json"),
 			JSON.stringify(

@@ -1,3 +1,4 @@
+import { pdfEvidencePages, pdfReadNotice } from "../core/pdf";
 import type { Artifact, JobDetail } from "../contracts";
 export const escapeHtml = (s: string) =>
 	s
@@ -53,7 +54,13 @@ export function narrativeMarkdown(a: Artifact, d: JobDetail) {
 		.join("\n\n");
 	const grouped = new Map<
 		string,
-		{ title: string; url: string; refs: number[] }
+		{
+			title: string;
+			url: string;
+			refs: number[];
+			pages: number[];
+			notice: string;
+		}
 	>();
 	a.claimIds.forEach((id, i) => {
 		const c = d.claims.find((c) => c.id === id);
@@ -64,14 +71,17 @@ export function narrativeMarkdown(a: Artifact, d: JobDetail) {
 			title: source.title,
 			url: source.finalUrl,
 			refs: [],
+			pages: [],
+			notice: pdfReadNotice(source.pdf),
 		};
 		group.refs.push(i + 1);
+		if (e) group.pages.push(...pdfEvidencePages(source, e.start, e.end));
 		grouped.set(source.finalUrl, group);
 	});
 	const sources = [...grouped.values()]
 		.map(
 			(source) =>
-				`${source.refs.map((n) => `[${n}]`).join(" ")} [${mdText(source.title)}](${source.url.replaceAll("(", "%28").replaceAll(")", "%29")})`,
+				`${source.refs.map((n) => `[${n}]`).join(" ")} [${mdText(source.title)}](${source.url.replaceAll("(", "%28").replaceAll(")", "%29")})${source.pages.length ? ` — PDF p. ${[...new Set(source.pages)].sort((a, b) => a - b).join(", ")}` : ""}${source.notice ? `\n\n${mdText(source.notice)}` : ""}`,
 		)
 		.join("\n\n");
 

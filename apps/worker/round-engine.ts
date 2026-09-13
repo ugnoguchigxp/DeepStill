@@ -1,3 +1,52 @@
+import { splitTokenReservation } from "../../packages/research/budget";
+import { outputLimit } from "../../packages/llm-provider";
+import { pdfReadNotice } from "../../packages/core/pdf";
+import { compactDirectionContext } from "../../packages/research/context";
+import {
+	changedMemoryClaims,
+	selectMemoryDependencies,
+} from "../../packages/memory/delta";
+import { memoryPartitions } from "../../packages/memory/partition";
+import {
+	updateGaps,
+	combineReviews,
+	type MemoryGap,
+} from "../../packages/memory/gaps";
+import {
+	directionSchema,
+	questionContract,
+	researchSatisfied,
+	actionBudgetConstraint,
+	actionSelectionSchema,
+	initialQuestions,
+	questionBrief,
+	updateQuestions,
+	applyCoverage,
+	sourceAttempts,
+	validateAction,
+	actionKey,
+	digest,
+	pendingSourceBatch,
+	rangeSelectionSchema,
+	type Question,
+	type ActionCandidate,
+} from "../../packages/research/direction";
+import { sourceIndex, readSourceRange } from "../../packages/memory/source";
+import { fits, evaluationHold } from "../../packages/research/budget";
+import {
+	memoryContext,
+	memoryStageHash,
+	allocateMemoryIds,
+	emptyBundle,
+	memoryInput,
+	memorySchemas,
+	memoryReviewResponse,
+	validateMemory,
+	memoryCandidates,
+	memoryReviewPass,
+	drillMemory,
+	type MemoryBundle,
+} from "../../packages/memory";
 import { LlmFetchError } from "llm-fetch";
 import { SearchProviderError } from "../../packages/search-provider";
 import { summariesSchema } from "../../packages/research/rounds";
@@ -37,11 +86,12 @@ import {
 } from "../../packages/core";
 import { BudgetExceeded, LeaseLost, type Task, uid } from "../../packages/db";
 import { tokenReservation } from "../../packages/llm-provider";
-import type { PromptKind } from "../../packages/prompts";
+import { prompt, type PromptKind } from "../../packages/prompts";
 import {
 	type Brief,
 	type Evaluation,
 	briefSchema,
+	validatePreparedBrief,
 	chooseOpportunities,
 	exactIds,
 	type Round,
@@ -92,7 +142,25 @@ export class RoundEngine {
 		deps: string[] = [],
 		priority = 50,
 	) {
-		const w = this.item(job, roundId, kind, payload, deps, priority);
+		const parent = this.store
+			.workItems(job.id)
+			.find((i) => i.roundId === roundId && i.payload.actionId);
+		const w = this.item(
+			job,
+			roundId,
+			kind,
+			{
+				...(parent
+					? {
+							actionId: parent.payload.actionId,
+							questionIds: parent.payload.questionIds,
+						}
+					: {}),
+				...payload,
+			},
+			deps,
+			priority,
+		);
 		this.store.saveWork(w);
 		return w;
 	}
@@ -122,6 +190,37 @@ export class RoundEngine {
 					? "skipped"
 					: "succeeded";
 				w.result = result;
+				if (w.payload.actionId) {
+					const action = this.store.record<Record<string, unknown>>(
+						t.job_id,
+						"action",
+						String(w.payload.actionId),
+					);
+					if (
+						action &&
+						!["succeeded", "failed", "unknown", "cancelled"].includes(
+							String(action.status),
+						)
+					) {
+						const done =
+							action.operation === "search"
+								? w.kind === "search_poll"
+								: ["read_source", "fetch_source"].includes(
+											String(action.operation),
+										)
+									? w.kind === "check_claims"
+									: w.kind === "evaluate";
+						this.store.put(t.job_id, "action", String(w.payload.actionId), {
+							...action,
+							status: (result as { unread?: boolean })?.unread
+								? "failed"
+								: done
+									? "succeeded"
+									: "running",
+							lastWorkId: w.id,
+						});
+					}
+				}
 				w.revision++;
 				this.store.saveWork(w);
 				fn();
@@ -141,13 +240,29 @@ export class RoundEngine {
 
 	async llm(t: Task, w: WorkItem, job: Job, kind: PromptKind, input: unknown) {
 		const text = JSON.stringify(input);
+		const invocation = prompt(kind, text);
+		if (
+			Buffer.byteLength(invocation.system + invocation.content.text) >
+			Number(job.config.providerInputBytes ?? 200000)
+		)
+			throw Error("PROVIDER_INPUT_LIMIT");
+		this.store.atomic(() => {
+			this.store.assertLease(t);
+			w.payload.inputRevision = this.store.research(job.id).revision;
+			w.payload.promptHash = digest({
+				role: invocation.role,
+				system: invocation.system,
+				text: invocation.content.text,
+			});
+			this.store.saveWork(w);
+		});
 		const amount =
 			tokenReservation(text, kind) +
 			(job.config.llmProvider === "codex" ? 20000 : 0);
 		return this.host.operation(
 			t,
-			`round:${w.id}:${kind}:${w.payload.pass ?? 0}:${w.payload.repair ?? 0}`,
-			{ requests: 1, tokens: amount },
+			`round:${w.id}:${w.roundId === "final" && kind.startsWith("memory_") ? "memory-final:" : ""}${kind}:${w.payload.pass ?? 0}:${w.payload.repair ?? 0}`,
+			{ requests: 1, ...splitTokenReservation(amount, outputLimit(kind)) },
 			() =>
 				this.providers.llm.complete(
 					kind,
@@ -156,6 +271,958 @@ export class RoundEngine {
 				),
 		);
 	}
+	memoryDetail(job: Job) {
+		const detail = this.store.detail(job.id);
+		if (!detail) throw new Error("JOB_MISSING");
+		// The UI detail intentionally returns a window. Memory must see all recorded decisions.
+		detail.events = [];
+		for (let after = 0; ; ) {
+			const page = this.store.events(job.id, after);
+			detail.events.push(...page);
+			if (page.length < 500) break;
+			after = page[page.length - 1].id;
+		}
+		return detail;
+	}
+	continueSource(job: Job, round: Round, work: WorkItem, read?: WorkItem) {
+		const result = read?.result as
+			| { sourceId?: string; passages?: { start: number; length: number }[] }
+			| undefined;
+		if (
+			job.config.researchControlVersion !== 2 ||
+			!result?.sourceId ||
+			!result.passages?.length
+		)
+			return;
+		const next = this.enqueue(
+			job,
+			round.id,
+			"read",
+			{
+				sourceId: result.sourceId,
+				actionId: read?.payload.actionId,
+				questionIds: read?.payload.questionIds,
+			},
+			[work.id],
+			work.priority,
+		);
+		const check = this.enqueue(
+			job,
+			round.id,
+			"check_claims",
+			{ readId: next.id },
+			[next.id],
+			work.priority,
+		);
+		for (const evaluation of this.store
+			.workItems(job.id)
+			.filter(
+				(item) =>
+					item.kind === "evaluate" &&
+					item.roundId === round.id &&
+					item.status === "pending",
+			)) {
+			evaluation.dependsOn.push(check.id);
+			this.store.saveWork(evaluation);
+		}
+	}
+	async checkpoint(
+		t: Task,
+		w: WorkItem,
+		job: Job,
+	): Promise<MemoryBundle | null> {
+		if (job.config.memoryVersion !== 1) return null;
+		const detail = this.memoryDetail(job);
+		const source = memoryInput(detail);
+		if (w.payload.repairAction)
+			source.inputHash = digest({
+				inputHash: source.inputHash,
+				repairAction: w.payload.repairAction,
+			});
+		const cached = w.payload.memoryCheckpoint as
+			| { hash: string; stage: number; bundle: MemoryBundle; attempt: number }
+			| undefined;
+		let state = cached?.hash === source.inputHash ? cached : undefined;
+		if (!state) {
+			delete w.payload.memoryPartition;
+			const existing = detail.memory?.find(
+				(m) => m.inputHash === source.inputHash && m.status === "reviewed",
+			);
+			if (existing) return existing;
+			state = {
+				hash: source.inputHash,
+				stage: 0,
+				bundle: {
+					...emptyBundle(detail, detail.memory?.[0]),
+					knowledge: detail.memory?.[0]?.knowledge ?? [],
+					episodes: detail.memory?.[0]?.episodes ?? [],
+					concepts: detail.memory?.[0]?.concepts ?? [],
+					relations: detail.memory?.[0]?.relations ?? [],
+					id: `memory:${source.inputHash}`,
+					inputHash: source.inputHash,
+				},
+				attempt: 0,
+			};
+		}
+		if (state.stage === 4) return state.bundle;
+		if (
+			job.config.researchControlVersion === 2 &&
+			w.kind === "evaluate" &&
+			!source.evidence.length &&
+			!w.payload.repairAction
+		) {
+			// With no factual evidence there is nothing to distill for direction
+			// selection. Preserve actual events now; distill once at finalization.
+			const bundle = emptyBundle(detail, detail.memory?.[0]);
+			bundle.structuralIssues = validateMemory(bundle, detail);
+			if (bundle.structuralIssues.length) throw Error("MEMORY_INVALID");
+			state = { ...state, stage: 4, bundle };
+			this.store.commit(
+				t,
+				() => {
+					this.store.put(job.id, "memory", bundle.id, bundle);
+					w.payload.memoryCheckpoint = state;
+					this.store.saveWork(w);
+					this.store.event(job.id, "memory.distillation_deferred", {
+						memoryId: bundle.id,
+						reason: "zero_evidence",
+						events: bundle.events.length,
+					});
+				},
+				{ phase: "round" },
+			);
+			return bundle;
+		}
+		const kinds = [
+			"memory_knowledge",
+			"memory_episode",
+			"memory_concepts",
+			"memory_review",
+		] as const;
+		const kind = kinds[state.stage];
+		const sourceBundle = state.bundle;
+		const stageHash = memoryStageHash(kind, detail, sourceBundle);
+		const targetPrefixes =
+			kind === "memory_knowledge"
+				? ["k:"]
+				: kind === "memory_episode"
+					? ["ep:"]
+					: ["c:", "k:"];
+		const unneededRepair =
+			state.attempt > 0 &&
+			kind !== "memory_review" &&
+			!(sourceBundle.review?.defects ?? []).some(
+				(d) =>
+					d.targetId === "bundle" ||
+					targetPrefixes.some((p) => d.targetId.startsWith(p)),
+			);
+		const previous = unneededRepair
+			? sourceBundle
+			: detail.memory?.find((m) => m.stageHashes?.[kind] === stageHash);
+		const incremental = job.config.researchControlVersion === 2;
+		const emptyStage =
+			incremental &&
+			(((kind === "memory_knowledge" || kind === "memory_concepts") &&
+				!source.evidence.length) ||
+				(kind === "memory_episode" && !source.events.length));
+		if (
+			incremental &&
+			(emptyStage ||
+				unneededRepair ||
+				(previous && state.attempt === 0 && !w.payload.repairAction))
+		) {
+			if (kind === "memory_knowledge")
+				sourceBundle.knowledge = emptyStage ? [] : (previous?.knowledge ?? []);
+			if (kind === "memory_episode")
+				sourceBundle.episodes = emptyStage ? [] : (previous?.episodes ?? []);
+			if (kind === "memory_concepts") {
+				sourceBundle.concepts = emptyStage ? [] : (previous?.concepts ?? []);
+				sourceBundle.relations = emptyStage ? [] : (previous?.relations ?? []);
+			}
+			if (kind === "memory_review") {
+				sourceBundle.review = previous?.review ?? null;
+				sourceBundle.status = "reviewed";
+			}
+			sourceBundle.stageHashes = {
+				...sourceBundle.stageHashes,
+				[kind]: stageHash,
+			};
+			allocateMemoryIds(sourceBundle, previous);
+			state.stage++;
+			this.store.commit(
+				t,
+				() => {
+					this.store.put(job.id, "memory", sourceBundle.id, sourceBundle);
+					w.payload.memoryCheckpoint = state;
+					w.status = "pending";
+					this.store.saveWork(w);
+				},
+				{ phase: "round" },
+			);
+			return null;
+		}
+		const priorBundle = detail.memory?.find(
+			(m) => m.id !== sourceBundle.id && m.status === "reviewed",
+		);
+		const deltaClaims =
+			job.config.researchControlVersion === 2 &&
+			(kind === "memory_knowledge" || kind === "memory_concepts")
+				? changedMemoryClaims(detail, state.bundle, priorBundle)
+				: null;
+		const selectedDetail = deltaClaims
+			? {
+					...detail,
+					claims: detail.claims.filter((c) => deltaClaims.includes(c.id)),
+				}
+			: detail;
+		const selectedBundle = deltaClaims
+			? selectMemoryDependencies(state.bundle, deltaClaims)
+			: state.bundle;
+		const partitions = memoryPartitions(
+			kind,
+			selectedDetail,
+			selectedBundle,
+			deltaClaims && priorBundle
+				? selectMemoryDependencies(priorBundle, deltaClaims)
+				: detail.memory?.[0],
+			Number(job.config.memoryContextBytes ?? 160000),
+		);
+		const partitionIndex = Number(w.payload.memoryPartition ?? 0);
+		const input = {
+			...partitions[partitionIndex],
+			priorValidationError: w.payload.validationError ?? null,
+			repairRequest: w.payload.repairAction ?? null,
+			gaps: this.store
+				.all<MemoryGap>(job.id, "gap")
+				.filter((g) => g.state === "open"),
+			...(state.attempt
+				? {
+						surroundingEvidence: sourceBundle.evidence.map((e) =>
+							drillMemory(sourceBundle, detail, e.evidenceId),
+						),
+					}
+				: {}),
+		};
+		if (
+			new TextEncoder().encode(JSON.stringify(input)).length >
+			Number(job.config.memoryContextBytes ?? 160000)
+		)
+			throw new Error("MEMORY_CONTEXT_LIMIT");
+		const response = await this.llm(t, w, job, kind, input);
+		const parsed = memorySchemas[kind].parse(JSON.parse(response.text));
+		const bundle = {
+			...state.bundle,
+			...(kind === "memory_review" ? {} : parsed),
+			stageHashes: { ...state.bundle.stageHashes, [kind]: stageHash },
+		};
+		if (job.config.researchControlVersion === 2 && kind !== "memory_review")
+			allocateMemoryIds(bundle, state.bundle);
+		if (partitions.length > 1 && kind !== "memory_review" && !deltaClaims) {
+			const merge = <T extends { id: string }>(old: T[], next: T[]) => [
+				...old.filter((o) => !next.some((n) => n.id === o.id)),
+				...next,
+			];
+			bundle.knowledge = merge(state.bundle.knowledge, bundle.knowledge);
+			bundle.episodes = merge(state.bundle.episodes, bundle.episodes);
+			bundle.concepts = merge(state.bundle.concepts, bundle.concepts);
+			bundle.relations = [
+				...new Map(
+					[...state.bundle.relations, ...bundle.relations].map((r) => [
+						JSON.stringify(r),
+						r,
+					]),
+				).values(),
+			];
+		}
+		if (deltaClaims) {
+			const activeClaims =
+				partitions.length > 1
+					? (input.claims ?? []).map((c) => c.id)
+					: deltaClaims;
+			if (kind === "memory_knowledge")
+				bundle.knowledge = [
+					...state.bundle.knowledge.filter(
+						(o) => !o.claimIds.some((id) => activeClaims.includes(id)),
+					),
+					...bundle.knowledge,
+				];
+			if (kind === "memory_concepts") {
+				bundle.concepts = [
+					...state.bundle.concepts.filter(
+						(o) => !o.claimIds.some((id) => activeClaims.includes(id)),
+					),
+					...bundle.concepts,
+				];
+				const ids = new Set(
+					[...bundle.knowledge, ...bundle.episodes, ...bundle.concepts].map(
+						(o) => o.id,
+					),
+				);
+				bundle.relations = [
+					...state.bundle.relations.filter(
+						(r) =>
+							!r.claimIds.some((id) => activeClaims.includes(id)) &&
+							ids.has(r.from) &&
+							ids.has(r.to),
+					),
+					...bundle.relations,
+				];
+			}
+		}
+		bundle.structuralIssues = validateMemory(bundle, detail);
+		if (bundle.structuralIssues.length)
+			throw new Error(`MEMORY_INVALID:${bundle.structuralIssues.join(",")}`);
+		if (this.store.research(job.id).revision !== source.revision)
+			throw new Error("RESEARCH_REVISION_CHANGED");
+		const lastPartition = partitionIndex + 1 >= partitions.length;
+		if (!lastPartition) delete bundle.stageHashes[kind];
+		state = { ...state, bundle, stage: state.stage + (lastPartition ? 1 : 0) };
+		if (kind === "memory_review") {
+			const reviewed = memoryReviewResponse.parse(parsed);
+			const accumulated = partitionIndex > 0 ? state.bundle.review : null;
+			bundle.review = combineReviews(accumulated, reviewed);
+			bundle.structuralIssues = validateMemory(bundle, detail);
+			if (bundle.structuralIssues.length)
+				throw new Error(`MEMORY_INVALID:${bundle.structuralIssues.join(",")}`);
+			bundle.status = lastPartition ? "reviewed" : "draft";
+			const repair = bundle.review.defects.some(
+				(d) => d.route === "revise_memory" || d.route === "inspect_evidence",
+			);
+			this.store.assertLease(t);
+			// Preserve review attempts; a revision never overwrites its predecessor.
+
+			if (
+				repair &&
+				state.attempt === 0 &&
+				lastPartition &&
+				job.config.researchControlVersion !== 2
+			) {
+				state = {
+					hash: source.inputHash,
+					stage: 0,
+					attempt: 1,
+					bundle: {
+						...bundle,
+						id: `${bundle.id}:repair`,
+						supersedes: bundle.id,
+						status: "draft",
+						asOf: new Date().toISOString(),
+					},
+				};
+			}
+		}
+		const savedState = state;
+		this.store.commit(
+			t,
+			() => {
+				this.store.put(job.id, "memory", bundle.id, bundle);
+				if (
+					kind === "memory_review" &&
+					bundle.review &&
+					job.config.researchControlVersion === 2
+				)
+					for (const gap of updateGaps(
+						this.store.all<MemoryGap>(job.id, "gap"),
+						bundle.review,
+						bundle.id,
+					))
+						this.store.put(job.id, "gap", gap.id, gap);
+				w.payload.memoryCheckpoint = savedState;
+				w.payload.memoryPartition = lastPartition ? 0 : partitionIndex + 1;
+				delete w.payload.repair;
+				w.payload.pass = Number(w.payload.pass ?? 0) + 1;
+				w.status = "pending";
+				this.store.saveWork(w);
+				this.store.event(job.id, "memory.stage_completed", {
+					kind,
+					memoryId: bundle.id,
+					stage: savedState.stage,
+					attempt: savedState.attempt,
+					review: kind === "memory_review" ? bundle.review : undefined,
+				});
+			},
+			{ phase: "round" },
+		);
+		return null;
+	}
+
+	async direction(
+		t: Task,
+		w: WorkItem,
+		job: Job,
+		r: Round,
+		memory: MemoryBundle,
+	) {
+		const detail = this.memoryDetail(job);
+		const revision = this.store.research(job.id).revision;
+		if (pendingSourceBatch(detail.research?.items ?? []))
+			throw Error("SOURCE_BATCH_UNSETTLED");
+		const brief = detail.memoryBrief;
+		if (!brief) throw Error("BRIEF_MISSING");
+		let questions = this.store.all<Question>(job.id, "question");
+		if (!questions.length) questions = initialQuestions(brief, revision);
+		const claims = detail.claims.filter((c) => c.accepted);
+		let input = {
+			originalRequest: job.topic,
+			completedWorkIds: (detail.research?.items ?? [])
+				.filter((i) => i.status === "succeeded")
+				.map((i) => i.id),
+			priorValidationError: w.payload.validationError ?? null,
+			brief: questionBrief(questions),
+			questions,
+			claims: claims.map((c) => ({
+				id: c.id,
+				text: c.text,
+				evidence: detail.evidence.filter((e) => c.evidenceIds.includes(e.id)),
+			})),
+			memory: {
+				knowledge: memory.knowledge.map((k) => ({
+					id: k.id,
+					title: k.title,
+					claimIds: k.claimIds,
+				})),
+				episodes: memory.episodes.map((e) => ({
+					id: e.id,
+					title: e.title,
+					eventIds: e.eventIds,
+					claimIds: e.claimIds,
+				})),
+				concepts: memory.concepts.map((c) => ({
+					id: c.id,
+					name: c.name,
+					claimIds: c.claimIds,
+				})),
+				defects: memory.review?.defects ?? [],
+			},
+			sourceAttempts: sourceAttempts(detail),
+			sources: detail.sources.map((s) => sourceIndex(s)),
+			readRanges: (detail.research?.items ?? [])
+				.filter((i) => i.kind === "read")
+				.map((i) => {
+					const result = i.result as Record<string, unknown> | undefined;
+					return {
+						id: i.id,
+						sourceId: result?.sourceId ?? i.payload.sourceId,
+						start: result?.start ?? i.payload.start,
+						end: result?.end ?? i.payload.end,
+						status: i.status,
+						unread: result?.unread,
+					};
+				}),
+			contextPolicy:
+				"Full verified claims and exact evidence are retained. Memory objects are navigation metadata only; full object bodies remain saved and can be revised via repair actions. Discovery metadata is not evidence.",
+			unattemptedDiscoveries: (detail.research?.rounds ?? [])
+				.flatMap((round) => round.candidates)
+				.filter(
+					(c) =>
+						!(detail.research?.items ?? []).some(
+							(w) => w.kind === "fetch" && w.payload.url === c.url,
+						),
+				),
+			userCandidates: detail.research?.candidates ?? [],
+			previousQueries: detail.queries.map((q) => q.query),
+			previousActions: this.store
+				.all<Record<string, unknown>>(job.id, "action")
+				.map((a) => ({
+					id: a.id,
+					operation: a.operation,
+					questionIds: a.questionIds,
+					targetId: a.targetId,
+					expectedDelta: a.expectedDelta,
+					status: a.status,
+					reason: a.reason,
+					constraint: a.constraint,
+				})),
+			reportDefects: w.payload.reportDefects ?? null,
+			gaps: this.store
+				.all<MemoryGap>(job.id, "gap")
+				.filter((g) => g.state === "open"),
+			remaining: Object.fromEntries(
+				Object.entries(job.budget).map(([k, v]) => [
+					k,
+					v - (job.usage[k as keyof typeof job.usage] ?? 0),
+				]),
+			),
+		};
+		const context = compactDirectionContext(
+			input,
+			Number(job.config.providerInputBytes ?? 200000),
+			(value) => {
+				const p = prompt("research_direction_review", JSON.stringify(value));
+				return Buffer.byteLength(p.system + p.content.text);
+			},
+		);
+		input = context.input;
+		if (!context.fits) {
+			this.complete(
+				t,
+				w,
+				{
+					reason: "review_context_capacity",
+					inputHash: digest(input),
+					bytes: context.bytes,
+				},
+				() => {
+					this.meta(job, { sufficient: false });
+					this.store.event(job.id, "research.context_capacity", {
+						fullBytes: context.fullBytes,
+						bytes: context.bytes,
+						evidenceOmitted: false,
+					});
+					this.finalize(job, "review_context_capacity");
+				},
+			);
+			return;
+		}
+		const inputHash = digest({ ...input, remaining: undefined });
+		const cached = w.payload.direction as
+			| {
+					inputHash: string;
+					proposal: ReturnType<typeof directionSchema.parse>;
+					questions: Question[];
+					changedQuestionIds?: string[];
+			  }
+			| undefined;
+		if (!cached || cached.inputHash !== inputHash) {
+			const response = await this.llm(
+				t,
+				w,
+				job,
+				"research_direction_review",
+				input,
+			);
+			const proposal = directionSchema.parse(JSON.parse(response.text));
+			validateEvaluation(
+				proposal.evaluation,
+				input.brief,
+				claims.map((c) => c.id),
+			);
+			if (
+				proposal.actions.some((a) =>
+					a.dependsOn.some((id) => !input.completedWorkIds.includes(id)),
+				)
+			)
+				throw Error(
+					"ACTION_DEPENDENCY_REFERENCE: use only completedWorkIds; independent alternatives need no dependency",
+				);
+			if (
+				proposal.actions.some(
+					(a) =>
+						a.operation === "read_source" &&
+						!detail.sources.some(
+							(s) =>
+								s.id === a.targetId &&
+								a.end > a.start &&
+								a.end <= s.text.length,
+						),
+				)
+			)
+				throw Error(
+					"ACTION_SOURCE_REFERENCE: a failed fetch is not an available snapshot",
+				);
+			const changed = updateQuestions(
+				questions,
+				proposal.questionUpdates,
+				claims.map((c) => c.id),
+				revision,
+			);
+			const assessed = applyCoverage(questions, proposal.evaluation, revision);
+			const changedQuestionIds = changed.questions
+				.filter((q) => {
+					const old = questions.find((x) => x.id === q.id);
+					return !old || questionContract(old) !== questionContract(q);
+				})
+				.map((q) => q.id);
+			if (
+				changedQuestionIds.length &&
+				Number(w.payload.questionRevisionPass ?? 0) >= 2
+			)
+				throw Error("QUESTION_REVISION_LIMIT");
+			questions = changed.questions.map((q) =>
+				changedQuestionIds.includes(q.id)
+					? {
+							...q,
+							status: "open" as const,
+							claimIds: [],
+							unknowns: [
+								"Question contract changed; fresh evaluation required",
+							],
+						}
+					: { ...q, ...assessed.find((x) => x.id === q.id) },
+			);
+
+			proposal.actions = proposal.actions.map((a) => ({
+				...a,
+				id: `action:${digest({ inputHash, a }).slice(0, 24)}`,
+				questionIds: a.questionIds.map((id) => changed.aliases.get(id) ?? id),
+			}));
+			if (
+				new Set(proposal.actions.map((a) => a.id)).size !==
+				proposal.actions.length
+			)
+				throw Error("DUPLICATE_ACTION");
+			if (this.store.research(job.id).revision !== revision)
+				throw Error("RESEARCH_REVISION_CHANGED");
+			this.store.commit(
+				t,
+				() => {
+					w.payload.direction = {
+						inputHash,
+						proposal,
+						questions,
+						changedQuestionIds,
+					};
+					w.payload.pass = Number(w.payload.pass ?? 0) + 1;
+					w.status = "pending";
+					this.store.saveWork(w);
+				},
+				{ phase: "round" },
+			);
+			return;
+		}
+		questions = cached.questions;
+		const proposal = cached.proposal;
+		if (cached.changedQuestionIds?.length) {
+			this.complete(
+				t,
+				w,
+				{
+					questionRevision: cached.changedQuestionIds,
+					discardedEvaluation: proposal.evaluation,
+				},
+				() => {
+					for (const q of questions)
+						this.store.put(job.id, "question", q.id, q);
+					this.store.put(job.id, "brief", "brief", {
+						id: "brief",
+						...questionBrief(questions),
+					});
+					this.store.put(job.id, "question_history", `${revision}:${w.id}`, {
+						id: `${revision}:${w.id}`,
+						questions,
+					});
+					this.meta(job, { sufficient: false });
+					this.store.event(job.id, "research.questions_revised", {
+						questionIds: cached.changedQuestionIds,
+						requiresReevaluation: true,
+					});
+					this.enqueue(
+						job,
+						r.id,
+						"evaluate",
+						{
+							questionRevisionPass:
+								Number(w.payload.questionRevisionPass ?? 0) + 1,
+						},
+						[],
+						0,
+					);
+				},
+			);
+			return;
+		}
+		const sufficient = researchSatisfied(questions, proposal.evaluation);
+		const freshForSelection = this.store.getJob(job.id)!;
+
+		const history = this.store.all<{ key: string; status: string }>(
+			job.id,
+			"action",
+		);
+		const candidateChecks = proposal.actions.map((action) => ({
+			id: action.id,
+			constraint:
+				((w.payload.rejectedSelectionIds as string[] | undefined)?.includes(
+					action.id,
+				)
+					? "selection_rejected"
+					: null) ??
+				validateAction(
+					action,
+					action.operation === "search" ? `pending-query:${action.id}` : "",
+					detail,
+					questions,
+					history,
+				) ??
+				(action.purpose === "supplement" && !sufficient
+					? "core_unmet"
+					: null) ??
+				(["revise_memory", "inspect_content", "decide_direction"].includes(
+					action.operation,
+				) &&
+				this.store
+					.workItems(job.id)
+					.some((i) => i.payload.repairAction && i.roundId === r.id)
+					? "repair_limit"
+					: null) ??
+				actionBudgetConstraint(
+					freshForSelection,
+					action,
+					r.number,
+					freshForSelection.mode === "live" && action.operation === "search"
+						? this.host.requestCost(freshForSelection)
+						: 0,
+				),
+		}));
+		const response = await this.llm(t, w, job, "research_action_select", {
+			originalRequest: input.originalRequest,
+			knownClaims: input.claims.map((claim) => ({
+				id: claim.id,
+				text: claim.text,
+			})),
+			sourceAttempts: input.sourceAttempts,
+			unattemptedDiscoveries: input.unattemptedDiscoveries,
+			previousQueries: input.previousQueries,
+			previousActions: input.previousActions.map((value) => {
+				const action = value as Record<string, unknown>;
+				return {
+					id: action.id,
+					operation: action.operation,
+					questionIds: action.questionIds,
+					targetId: action.targetId,
+					expectedDelta: action.expectedDelta,
+					status: action.status,
+					reason: action.reason,
+				};
+			}),
+			gaps: input.gaps,
+			remaining: input.remaining,
+			inputScope:
+				"Selection metadata after the verified direction review; full source evidence remains in the saved review input and is not re-summarized here.",
+			questions,
+			completionAllowed: sufficient,
+			actions: proposal.actions,
+			candidateChecks,
+			admissibleActionIds: candidateChecks
+				.filter((c) => !c.constraint)
+				.map((c) => c.id),
+			evaluation: proposal.evaluation,
+		});
+		const selection = actionSelectionSchema.parse(JSON.parse(response.text));
+		exactIds(
+			proposal.actions.map((a) => a.id),
+			selection.reasons.map((x) => x.id),
+		);
+		const selected = proposal.actions.find(
+			(a) => a.id === selection.selectedId,
+		);
+		if ((selection.decision === "adopt") !== !!selected)
+			throw Error("INVALID_ACTION_SELECTION");
+
+		let constraint = selected
+			? validateAction(selected, selection.query, detail, questions, history)
+			: null;
+		if (
+			selected &&
+			["revise_memory", "inspect_content", "decide_direction"].includes(
+				selected.operation,
+			) &&
+			this.store
+				.workItems(job.id)
+				.some((i) => i.payload.repairAction && i.roundId === r.id)
+		)
+			constraint = "repair_limit";
+		const fresh = this.store.getJob(job.id)!;
+		if (selected && !constraint)
+			constraint =
+				candidateChecks.find((c) => c.id === selected.id)?.constraint ??
+				actionBudgetConstraint(
+					fresh,
+					selected,
+					r.number,
+					fresh.mode === "live" && selected.operation === "search"
+						? this.host.requestCost(fresh)
+						: 0,
+				);
+
+		if (
+			selected &&
+			constraint &&
+			!((w.payload.rejectedSelectionIds as string[]) ?? []).includes(
+				selected.id,
+			) &&
+			candidateChecks.some((c) => c.id !== selected.id && !c.constraint)
+		) {
+			this.store.commit(
+				t,
+				() => {
+					w.payload.rejectedSelectionIds = [
+						...((w.payload.rejectedSelectionIds as string[]) ?? []),
+						selected.id,
+					];
+					w.payload.pass = Number(w.payload.pass ?? 0) + 1;
+					w.payload.rejectedSelections = [
+						...((w.payload.rejectedSelections as unknown[]) ?? []),
+						{
+							actionId: selected.id,
+							reason: constraint,
+							alternativesRemain: true,
+						},
+					];
+					w.status = "pending";
+					this.store.saveWork(w);
+				},
+				{ phase: "round" },
+			);
+			return;
+		}
+		if (
+			selection.decision === "wait_approval" &&
+			!input.sourceAttempts.some((s) => s.state === "approval_pending")
+		)
+			throw Error("APPROVAL_STATE_UNSUPPORTED");
+		if (selected?.operation !== "search" && selection.query.trim())
+			throw Error("UNEXPECTED_SEARCH_QUERY");
+		if (selection.decision === "satisfied" && !sufficient)
+			throw Error("UNSUPPORTED_COMPLETION");
+		if (this.store.research(job.id).revision !== revision)
+			throw Error("RESEARCH_REVISION_CHANGED");
+		this.complete(t, w, { proposal, selection, constraint }, () => {
+			for (const rejected of (w.payload.rejectedSelections as Record<
+				string,
+				unknown
+			>[]) ?? [])
+				this.store.event(job.id, "research.selection_rejected", rejected);
+			for (const q of questions) this.store.put(job.id, "question", q.id, q);
+			this.store.put(job.id, "question_history", `${revision}:${w.id}`, {
+				id: `${revision}:${w.id}`,
+				questions,
+			});
+			this.store.put(job.id, "brief", "brief", {
+				id: "brief",
+				...questionBrief(questions),
+			});
+			for (const a of proposal.actions)
+				this.store.put(job.id, "action", a.id, {
+					...a,
+					key: actionKey(a, a.id === selected?.id ? selection.query : ""),
+					inputHash,
+					revision,
+					status: a.id === selected?.id && !constraint ? "queued" : "cancelled",
+					reason: selection.reasons.find((x) => x.id === a.id)?.reason,
+					constraint,
+				});
+			const decision = {
+				id: w.id,
+				inputHash,
+				revision,
+				selection,
+				constraint,
+				promptHash: digest(response.audit),
+				memoryId: memory.id,
+			};
+			this.store.put(job.id, "decision", w.id, decision);
+			this.store.event(job.id, "research.decision", decision);
+			r.state = "evaluated";
+			r.evaluation = proposal.evaluation;
+			this.saveRound(job, r);
+			this.meta(job, {
+				sufficient:
+					sufficient &&
+					!["unmet", "wait_approval"].includes(selection.decision),
+				decisionLocked: false,
+			});
+			if (selected && !constraint) {
+				if (selected.operation === "search") {
+					this.startRound(
+						fresh,
+						[selection.query],
+						selected.purpose === "supplement" ? "supplement" : "core",
+						selection.reason,
+					);
+					const nextRound = this.store.all<Round>(job.id, "round").at(-1)!;
+					for (const item of this.store
+						.workItems(job.id)
+						.filter((i) => i.roundId === nextRound.id)) {
+						item.payload.actionId = selected.id;
+						item.payload.questionIds = selected.questionIds;
+						this.store.saveWork(item);
+					}
+				} else if (selected.operation === "fetch_source") {
+					const candidate = detail
+						.research!.rounds.flatMap((round) => round.candidates)
+						.find((c) => c.id === selected.targetId)!;
+					const fetch = this.enqueue(fresh, r.id, "fetch", {
+						url: candidate.url,
+						title: candidate.title,
+						candidateId: candidate.id,
+						selectionReason: selection.reason,
+						actionId: selected.id,
+						questionIds: selected.questionIds,
+					});
+					const read = this.enqueue(
+						fresh,
+						r.id,
+						"read",
+						{
+							fetchId: fetch.id,
+							candidateId: candidate.id,
+							actionId: selected.id,
+							questionIds: selected.questionIds,
+						},
+						[fetch.id],
+					);
+					const check = this.enqueue(
+						fresh,
+						r.id,
+						"check_claims",
+						{ readId: read.id, actionId: selected.id },
+						[read.id],
+					);
+					this.enqueue(fresh, r.id, "evaluate", {}, [check.id], 0);
+				} else if (selected.operation === "read_source") {
+					const source = detail.sources.find(
+						(s) => s.id === selected.targetId,
+					)!;
+					readSourceRange(
+						source,
+						source.hash,
+						selected,
+						Number(job.config.sourceRangeBytes ?? 12000),
+					);
+					const read = this.enqueue(fresh, r.id, "read", {
+						sourceId: source.id,
+						start: selected.start,
+						end: selected.end,
+						actionId: selected.id,
+						questionIds: selected.questionIds,
+					});
+					const check = this.enqueue(
+						fresh,
+						r.id,
+						"check_claims",
+						{ readId: read.id, actionId: selected.id },
+						[read.id],
+					);
+					this.enqueue(fresh, r.id, "evaluate", {}, [check.id], 0);
+				} else {
+					// A distinct repair gets one new checkpoint; unchanged repeats are rejected by actionKey.
+					this.enqueue(
+						fresh,
+						r.id,
+						"evaluate",
+						{ repairAction: selected, actionId: selected.id, pass: 1 },
+						[],
+						0,
+					);
+				}
+			} else {
+				const reason =
+					constraint ??
+					(selection.decision === "wait_approval"
+						? "approval_pending"
+						: sufficient && selection.decision === "satisfied"
+							? "satisfied"
+							: "no_valuable_candidate");
+				for (const q of questions.filter((q) => q.status === "open"))
+					this.store.put(job.id, "question", q.id, {
+						...q,
+						status: "unresolved",
+					});
+				this.finalize(fresh, reason);
+			}
+		});
+	}
+
 	signal: AbortSignal = new AbortController().signal;
 	startRound(
 		job: Job,
@@ -223,9 +1290,16 @@ export class RoundEngine {
 		if (
 			!this.store
 				.workItems(job.id)
-				.some((w) => w.kind === "synthesize" && w.status !== "cancelled")
+				.some(
+					(w) =>
+						w.kind === "synthesize" &&
+						w.status !== "cancelled" &&
+						w.payload.researchRevision === this.store.research(job.id).revision,
+				)
 		)
-			this.enqueue(job, "final", "synthesize");
+			this.enqueue(job, "final", "synthesize", {
+				researchRevision: this.store.research(job.id).revision,
+			});
 	}
 	async step(t: Task, signal: AbortSignal) {
 		this.signal = signal;
@@ -357,18 +1431,16 @@ export class RoundEngine {
 				const result = await this.llm(t, w, job, "prepare_brief", {
 					originalRequest: job.topic,
 					knowledge: job.config.knowledge,
+					priorValidationError: w.payload.validationError ?? null,
+					previousOutput: w.payload.previousBriefOutput ?? null,
 				});
-				const brief = briefSchema.parse(JSON.parse(result.text));
-				if (
-					brief.requirements.some(
-						(r) => r.origin !== "inferred" && !job.topic.includes(r.origin),
-					)
-				)
-					throw new Error("INVALID_REQUIREMENT_ORIGIN");
-				exactIds(
-					brief.requirements.map((x) => x.id),
-					[...new Set(brief.requirements.map((x) => x.id))],
-				);
+				this.store.atomic(() => {
+					this.store.assertLease(t);
+					w.payload.previousBriefOutput = result.text;
+					this.store.saveWork(w);
+				});
+				const brief = validatePreparedBrief(JSON.parse(result.text), job.topic);
+
 				this.complete(t, w, brief, () => {
 					this.store.put(job.id, "brief", "brief", { id: "brief", ...brief });
 					this.startRound(job, [job.topic], "core", "一次探索");
@@ -571,7 +1643,16 @@ export class RoundEngine {
 							job,
 							r.id,
 							"fetch",
-							{ url: c.url, title: c.title, candidateId: c.id },
+							{
+								url: c.url,
+								title: c.title,
+								candidateId: c.id,
+								selectionReason: d.reason,
+								questionIds:
+									this.store
+										.record<Brief>(job.id, "brief", "brief")
+										?.requirements.map((q) => q.id) ?? [],
+							},
 							[],
 							d.priority,
 						);
@@ -621,6 +1702,9 @@ export class RoundEngine {
 					this.store.event(job.id, "source.saved", {
 						id: saved.id,
 						title: saved.title,
+						url: saved.finalUrl,
+						questionIds: w.payload.questionIds,
+						selectionReason: w.payload.selectionReason,
 					});
 				});
 				return;
@@ -629,7 +1713,10 @@ export class RoundEngine {
 				const fetch = this.store
 					.workItems(job.id)
 					.find((i) => i.id === w.payload.fetchId);
-				const sid = (fetch?.result as { sourceId?: string })?.sourceId;
+				const sid =
+					typeof w.payload.sourceId === "string"
+						? w.payload.sourceId
+						: (fetch?.result as { sourceId?: string })?.sourceId;
 				if (!sid) {
 					this.complete(t, w, {
 						unread: true,
@@ -639,11 +1726,93 @@ export class RoundEngine {
 				}
 				const source = this.store.record<Snapshot>(job.id, "source", sid);
 				if (!source) throw new Error("SOURCE_MISSING");
-				const passages = selectSections(
-					source.text,
-					`${job.topic} ${r.queries.join(" ")}`,
-					6000,
-				);
+				if (
+					job.config.researchControlVersion === 2 &&
+					typeof w.payload.start !== "number"
+				) {
+					const readRanges = this.store
+						.workItems(job.id)
+						.filter(
+							(i) =>
+								i.kind === "read" &&
+								i.status === "succeeded" &&
+								(i.result as { sourceId?: string })?.sourceId === source.id,
+						)
+						.flatMap((i) =>
+							(
+								(i.result as { passages?: { start: number; length: number }[] })
+									.passages ?? []
+							).map((p) => ({ start: p.start, end: p.start + p.length })),
+						);
+					if (readRanges.length >= Number(job.config.sourceRangeLimit ?? 8)) {
+						this.complete(t, w, {
+							unread: true,
+							reason: "SOURCE_RANGE_BUDGET",
+							sourceId: source.id,
+							readRanges,
+						});
+						return;
+					}
+					const selected = rangeSelectionSchema.parse(
+						JSON.parse(
+							(
+								await this.llm(t, w, job, "source_range_select", {
+									originalRequest: job.topic,
+									questions: this.store.all(job.id, "question"),
+									index: sourceIndex(source),
+									readRanges,
+									maxRangeBytes: Number(job.config.sourceRangeBytes ?? 12000),
+								})
+							).text,
+						),
+					);
+					if (selected.done) {
+						this.complete(t, w, {
+							unread: true,
+							reason: selected.reason,
+							sourceId: source.id,
+							readRanges,
+						});
+						return;
+					}
+					readSourceRange(
+						source,
+						source.hash,
+						selected,
+						Number(job.config.sourceRangeBytes ?? 12000),
+						readRanges,
+					);
+					this.store.commit(
+						t,
+						() => {
+							w.payload.start = selected.start;
+							w.payload.end = selected.end;
+							w.payload.sourceId = source.id;
+							w.payload.rangeReason = selected.reason;
+							w.payload.pass = Number(w.payload.pass ?? 0) + 1;
+							w.status = "pending";
+							this.store.saveWork(w);
+						},
+						{ phase: "round" },
+					);
+					return;
+				}
+				const passages =
+					typeof w.payload.start === "number" &&
+					typeof w.payload.end === "number"
+						? [
+								readSourceRange(
+									source,
+									source.hash,
+									{ start: w.payload.start, end: w.payload.end },
+									Number(job.config.sourceRangeBytes ?? 12000),
+								),
+							]
+						: selectSections(
+								source.text,
+								`${job.topic} ${r.queries.join(" ")}`,
+								6000,
+							);
 				if (!passages.length) {
 					this.complete(t, w, { unread: true, reason: "NO_RELEVANT_PASSAGES" });
 					return;
@@ -659,22 +1828,35 @@ export class RoundEngine {
 					},
 					roundQuestions: r.queries,
 					researchPurpose: r.purpose,
-					source: { title: source.title, url: source.finalUrl },
+					source: {
+						title: source.title,
+						url: source.finalUrl,
+						readingNotice: pdfReadNotice(source.pdf),
+					},
 					passages,
 					existingClaims: existing
 						.slice(-12)
 						.map((c) => ({ id: c.id, text: c.text })),
 				};
 				const text = JSON.stringify(input);
+				if (
+					Buffer.byteLength(
+						prompt("extract", text).system +
+							prompt("extract", text).content.text,
+					) > Number(job.config.providerInputBytes ?? 200000)
+				)
+					throw Error("PROVIDER_INPUT_LIMIT");
 				const result = await this.host.operation(
 					t,
 					`round:${w.id}:extract:${w.payload.repair ?? 0}`,
 					{
 						requests: 1,
 						documents: w.payload.repair ? 0 : 1,
-						tokens:
+						...splitTokenReservation(
 							tokenReservation(text, "extract") +
-							(job.config.llmProvider === "codex" ? 20000 : 0),
+								(job.config.llmProvider === "codex" ? 20000 : 0),
+							outputLimit("extract"),
+						),
 					},
 					() => this.providers.llm.complete("extract", text, signal),
 				);
@@ -764,7 +1946,9 @@ export class RoundEngine {
 					.all<Claim>(job.id, "claim")
 					.filter((c) => ids.includes(c.id));
 				if (!claims.length) {
-					this.complete(t, w, { claimIds: [] });
+					this.complete(t, w, { claimIds: [] }, () =>
+						this.continueSource(job, r, w, read),
+					);
 					return;
 				}
 				const input = {
@@ -804,6 +1988,8 @@ export class RoundEngine {
 					checked.decisions.map((d) => d.id),
 				);
 				this.complete(t, w, checked, () => {
+					this.continueSource(job, r, w, read);
+
 					for (const d of checked.decisions) {
 						const c = claims.find((c) => c.id === d.id);
 						if (!c) throw new Error("CLAIM_MISSING");
@@ -839,6 +2025,12 @@ export class RoundEngine {
 				return;
 			}
 			if (w.kind === "evaluate" && r) {
+				const memory = await this.checkpoint(t, w, job);
+				if (job.config.memoryVersion === 1 && !memory) return;
+				if (job.config.researchControlVersion === 2 && memory) {
+					await this.direction(t, w, job, r, memory);
+					return;
+				}
 				this.store.atomic(() => {
 					this.store.assertLease(t);
 					r.state = "evaluating";
@@ -861,6 +2053,7 @@ export class RoundEngine {
 					.all<Claim>(job.id, "claim")
 					.filter((c) => c.accepted);
 				let input = {
+					memory,
 					originalRequest: job.topic,
 					brief,
 					claims: claims.map((c) => ({
@@ -1004,6 +2197,23 @@ export class RoundEngine {
 						return;
 					}
 				}
+				if (
+					memory &&
+					!memoryReviewPass(memory) &&
+					job.config.researchControlVersion !== 2
+				) {
+					evaluation.sufficient = false;
+					evaluation.reason += " / Memory reuse review unresolved";
+					const researchGaps =
+						memory.review?.defects.filter((d) => d.route === "research") ?? [];
+					evaluation.opportunities = evaluation.opportunities.filter((o) =>
+						researchGaps.some(
+							(d) =>
+								d.requirementId === o.requirementId ||
+								d.requirementId === "general",
+						),
+					);
+				}
 				this.store.assertLease(t);
 				if (
 					this.store.research(job.id).revision !== revision &&
@@ -1077,15 +2287,27 @@ export class RoundEngine {
 				return;
 			}
 			if (w.kind === "synthesize" || w.kind === "edit") {
+				let memory: MemoryBundle | null = null;
+				if (w.kind === "edit")
+					memory =
+						this.store
+							.detail(job.id)
+							?.memory?.find(
+								(m) =>
+									m.id === (w.payload.previousReport as Artifact)?.memoryId,
+							) ?? null;
+				if (!memory) memory = await this.checkpoint(t, w, job);
+				if (job.config.memoryVersion === 1 && !memory) return;
 				const detail = this.store.detail(job.id);
 				if (!detail) throw new Error("JOB_MISSING");
 				const claims = detail.claims.filter((c) => c.accepted);
 				if (!claims.length) {
-					this.fallback(t, job, "no_verified_claims");
+					this.fallback(t, job, job.reason || "no_verified_claims");
 					return;
 				}
 				const input = {
 					...researchInput(detail),
+					memory,
 					readerBrief: this.store.record<Brief>(job.id, "brief", "brief"),
 					roundEvaluations: detail.research?.rounds.map((r) => r.evaluation),
 					supplementClaims: this.store.all(job.id, "round_claim"),
@@ -1111,6 +2333,7 @@ export class RoundEngine {
 				];
 				validateClaims(detail, ids);
 				const artifact: Artifact = {
+					memoryId: memory?.id,
 					id: `round-report-${job.id}-${(detail.artifacts[0]?.version ?? 0) + 1}`,
 					version: (detail.artifacts[0]?.version ?? 0) + 1,
 					title: job.topic,
@@ -1156,7 +2379,54 @@ export class RoundEngine {
 				});
 				const review = reviewSchema.parse(JSON.parse(result.text));
 				const structural = assessStructure(detail, artifact);
-				const passed = reviewPass(structural.pass, review);
+				const passed =
+					job.config.memoryVersion === 1
+						? structural.pass &&
+							review.scores.support >= 4 &&
+							review.majorIssues.length === 0
+						: reviewPass(structural.pass, review);
+				if (
+					job.config.researchControlVersion === 2 &&
+					review.researchNeeded &&
+					!w.payload.reviewOnly &&
+					this.store.all<Round>(job.id, "round").length < job.budget.rounds &&
+					fits(
+						this.store.getJob(job.id)!,
+						{
+							tokens: evaluationHold(job).tokens + 20000,
+							requests: evaluationHold(job).requests + 3,
+						},
+						[this.finishHold(job)],
+					)
+				) {
+					this.complete(t, w, review, () => {
+						this.store.put(job.id, "artifact", artifact.id, {
+							...artifact,
+							qualityState: "needs_revision",
+						});
+						exportArtifact(detail, artifact, this.root);
+						const revision = this.store.research(job.id).revision + 1;
+						this.meta(job, { revision, sufficient: false });
+						const current = this.store.getJob(job.id)!;
+						current.status = "running";
+						this.store.saveJob(current);
+						const last = this.store.all<Round>(job.id, "round").at(-1)!;
+						this.enqueue(
+							job,
+							last.id,
+							"evaluate",
+							{ reportDefects: review.majorIssues, researchRevision: revision },
+							[],
+							0,
+						);
+						this.store.event(job.id, "report.research_reopened", {
+							artifactId: artifact.id,
+							revision,
+							reasons: review.majorIssues,
+						});
+					});
+					return;
+				}
 				if (!passed && !w.payload.edited && !w.payload.reviewOnly) {
 					this.complete(t, w, review, () =>
 						this.enqueue(job, "final", "edit", {
@@ -1313,6 +2583,19 @@ export class RoundEngine {
 						job = this.store.getJob(job.id) as Job;
 						job.status = "partial";
 						job.reason = "external_result_unknown";
+						if (w.payload.actionId) {
+							const action = this.store.record<Record<string, unknown>>(
+								job.id,
+								"action",
+								String(w.payload.actionId),
+							);
+							if (action)
+								this.store.put(job.id, "action", String(w.payload.actionId), {
+									...action,
+									status: "unknown",
+									lastWorkId: w.id,
+								});
+						}
 						this.store.saveJob(job);
 					},
 					{ phase: "round" },
@@ -1338,6 +2621,7 @@ export class RoundEngine {
 					t,
 					() => {
 						w.payload.repair = 1;
+						w.payload.validationError = String(error);
 						w.status = "pending";
 						this.store.saveWork(w);
 						this.store.event(job.id, "work.invalid_response", {
@@ -1371,6 +2655,9 @@ export class RoundEngine {
 					this.store.saveWork(w);
 					this.store.event(job.id, "source.skipped", {
 						id: w.id,
+						url: w.payload.url,
+						questionIds: w.payload.questionIds,
+						selectionReason: w.payload.selectionReason,
 						...failure,
 					});
 				});
@@ -1394,6 +2681,20 @@ export class RoundEngine {
 					(d.artifacts[0]?.id ?? null) !== active.payload.baseArtifactId
 				)
 					throw new Error("ARTIFACT_CHANGED_DURING_GENERATION");
+				this.store.put(job.id, "outcome", artifact.id, {
+					id: artifact.id,
+					memoryId: artifact.memoryId ?? null,
+					artifactId: artifact.id,
+					research: this.store.research(job.id).sufficient
+						? "satisfied"
+						: "unmet",
+					memoryInspection:
+						d.memory?.find((m) => m.id === artifact.memoryId)?.status ??
+						"not_run",
+					reuseTest: "not_run",
+					reportInspection: artifact.qualityState ?? "not_run",
+					stopReason: job.reason,
+				});
 				exportArtifact(d, artifact, this.root);
 				this.store.put(job.id, "artifact", artifact.id, artifact);
 				for (const round of d.research?.rounds ?? []) {
@@ -1420,7 +2721,14 @@ export class RoundEngine {
 							: "追加根拠を本文へ採用しなかった",
 					});
 				}
-				for (const candidate of reportCandidates(d, artifact))
+				for (const candidate of job.config.memoryVersion === 1
+					? d.memory?.find((m) => m.id === artifact.memoryId)
+						? memoryCandidates(
+								d.memory.find((m) => m.id === artifact.memoryId)!,
+								artifact,
+							)
+						: []
+					: reportCandidates(d, artifact))
 					if (!this.store.record(job.id, "candidate", candidate.id))
 						this.store.put(job.id, "candidate", candidate.id, candidate);
 				if (review)
@@ -1441,13 +2749,24 @@ export class RoundEngine {
 				const fresh = this.store.getJob(job.id) as Job;
 				fresh.status =
 					d.research?.sufficient === true &&
-					artifact.qualityState !== "needs_revision"
+					artifact.qualityState !== "needs_revision" &&
+					(job.config.memoryVersion !== 1 ||
+						!!d.memory?.some(
+							(m) => m.id === artifact.memoryId && memoryReviewPass(m),
+						))
 						? "completed"
 						: "partial";
 				const maintenance = fresh.config.maintenance as
 					| { previousStatus?: Job["status"] }
 					| undefined;
-				if (maintenance && artifact.qualityState !== "needs_revision")
+				if (
+					maintenance &&
+					artifact.qualityState !== "needs_revision" &&
+					(job.config.memoryVersion !== 1 ||
+						!!d.memory?.some(
+							(m) => m.id === artifact.memoryId && memoryReviewPass(m),
+						))
+				)
 					fresh.status = maintenance.previousStatus ?? fresh.status;
 				delete fresh.config.maintenance;
 				if (artifact.qualityState === "needs_revision")
@@ -1472,7 +2791,39 @@ export class RoundEngine {
 		const d = this.store.detail(job.id);
 		if (!d) throw new Error("JOB_MISSING");
 		const claims = d.claims.filter((c) => c.accepted);
+		let retained = d.memory?.[0];
+		if (job.config.memoryVersion === 1 && !retained) {
+			retained = emptyBundle(this.memoryDetail(job));
+			const recorded = retained.events.filter(
+				(e) => e.type === "source.skipped" || e.type === "job.started",
+			);
+			if (recorded.length)
+				retained.episodes = [
+					{
+						id: "ep:unmet",
+						title: job.topic,
+						context: "調査の停止時点",
+						intent: job.topic,
+						observations: reason,
+						decisions: [],
+						actionTaken: "保存済みイベントを参照",
+						outcome: "調査は未達。後続利用は未実施。",
+						outcomeKind: "unknown",
+						failedApproach: [],
+						lesson: "停止理由と原文の有無を確認する必要がある",
+						triggers: [job.topic],
+						openLoops: [reason],
+						eventIds: recorded.slice(-60).map((e) => e.id),
+						claimIds: [],
+					},
+				];
+			this.store.atomic(() => {
+				this.store.assertLease(t);
+				this.store.put(job.id, "memory", retained!.id, retained);
+			});
+		}
 		const a: Artifact = {
+			memoryId: retained?.id,
 			id: `round-report-${job.id}-${(d.artifacts[0]?.version ?? 0) + 1}`,
 			version: (d.artifacts[0]?.version ?? 0) + 1,
 			title: job.topic,

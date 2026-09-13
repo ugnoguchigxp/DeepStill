@@ -1,0 +1,31 @@
+{
+	"version": "unseen-themes-v1",
+	"policy": "Register before first execution. Use fresh jobs with the same model and per-job budget as the same-theme live baseline. Report every result as applicability evidence; do not merge these runs into the LLM/Web fulfillment result or claim population accuracy.",
+	"themes": [
+		{
+			"id": "broad-explanation",
+			"category": "広い説明",
+			"topic": "都市のヒートアイランド現象の仕組みと原因を説明する。中心概念と因果関係を目的とし、調査手順の復元は求めない。"
+		},
+		{
+			"id": "narrow-specification",
+			"category": "狭い仕様",
+			"topic": "HTTPの304 Not Modifiedレスポンスが使われる条件と、メッセージ本文の扱いを仕様の根拠付きで確認する。対象はこのステータスの仕様に限定する。"
+		},
+		{
+			"id": "comparison-decision",
+			"category": "比較判断",
+			"topic": "小規模な組み込み機器のメッセージ配信でMQTTとHTTPを選ぶ際の条件とトレードオフを比較する。根拠のない一律の優劣はつけない。"
+		},
+		{
+			"id": "insufficient-evidence",
+			"category": "根拠不足",
+			"topic": "2028年の日本全国の家庭用ヒューマノイド普及台数を、公開資料の実績だけから確認する。実績を確認できなければ、予測値を実績として扱わず未確認とする。"
+		},
+		{
+			"id": "conflicting-results",
+			"category": "矛盾・条件差",
+			"topic": "リモートワークと生産性に関する研究結果の違いを調べ、測定対象・研究方法・適用条件の違いと、同じ条件での不一致を区別する。"
+		}
+	]
+}

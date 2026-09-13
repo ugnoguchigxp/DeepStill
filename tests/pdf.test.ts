@@ -1,4 +1,4 @@
-import { test, expect } from "bun:test";
+import { test, expect } from "vitest";
 import { pdfText } from "../packages/crawler/pdf";
 import { createLlmFetch } from "llm-fetch";
 function pdf(text: string) {

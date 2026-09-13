@@ -25,6 +25,8 @@ Web UIは http://127.0.0.1:5173 、APIは http://127.0.0.1:4310 で起動しま�
 
 ## Web調査
 
+新規の逐次探索では、Knowledge・Episode・概念索引を途中生成してレビューした後、人間向けレポートを作ります。「Knowledge・Episode」画面とMemory APIで参照できます。LLMの推定点と再利用試験の成績は別です。実装・評価コマンド・制約は[Memory先行生成v1](spec/memory-first-implementation.md)を参照してください。
+
 `.env.example` を参考に `.env` へDataForSEOのlogin/password、LLM_BASE_URL、LLM_MODEL、必要ならLLM_API_KEYを設定します。設定後にAPIとWorkerを再起動し、UIで「Web調査」を選びます。秘密情報はブラウザーへ返しません。
 
 Codex SDKを使う場合は `codex login` を済ませ、`.env` に `LLM_PROVIDER=codex` と `SEARCH_PROVIDER=codex` を設定します。モデルは `gpt-5.6-luna`、reasoningは `low`。検索にはCodex Web、本文取得にはllm-fetchを使用します。空の一時ディレクトリ、read-only、承認なし、shell無効の独立した呼び出しで処理します。UIにはプロバイダー・モデル・reasoningを表示します。

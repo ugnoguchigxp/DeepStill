@@ -8,12 +8,49 @@ export const briefSchema = z.object({
 				text: z.string().min(1),
 				required: z.boolean(),
 				origin: z.string().min(1),
+				originQuote: z.string().optional(),
 				criterion: z.string().min(1),
 			}),
 		)
 		.min(1)
 		.max(12),
 });
+export const preparedBriefSchema = z.object({
+	requirements: z
+		.array(
+			z.object({
+				id: z.string().min(1),
+				text: z.string().min(1),
+				required: z.boolean(),
+				origin: z.enum(["explicit", "inferred"]),
+				originQuote: z.string(),
+				criterion: z.string().min(1),
+			}),
+		)
+		.min(1)
+		.max(12),
+});
+export function validatePreparedBrief(value: unknown, originalRequest: string) {
+	const brief = preparedBriefSchema.parse(value);
+	for (const r of brief.requirements) {
+		if (
+			r.origin === "explicit" &&
+			(!r.originQuote.trim() || !originalRequest.includes(r.originQuote))
+		)
+			throw Error(
+				"INVALID_REQUIREMENT_ORIGIN: explicit requires a nonempty exact originQuote from originalRequest",
+			);
+		if (r.origin === "inferred" && r.originQuote !== "")
+			throw Error(
+				"INVALID_REQUIREMENT_ORIGIN: inferred requires originQuote to be empty",
+			);
+	}
+	exactIds(
+		brief.requirements.map((r) => r.id),
+		[...new Set(brief.requirements.map((r) => r.id))],
+	);
+	return brief;
+}
 export type Brief = z.infer<typeof briefSchema>;
 export const selectionSchema = z.object({
 	decisions: z
@@ -113,6 +150,11 @@ export interface WorkItem {
 	createdAt: number;
 }
 export interface ResearchState {
+	questions?: import("./direction").Question[];
+	actions?: unknown[];
+	decisions?: unknown[];
+	outcomes?: unknown[];
+	gaps?: unknown[];
 	holds?: import("./budget").BudgetHold[];
 	version: 2;
 	revision: number;

@@ -26,7 +26,13 @@
 	},
 	"overrides": [
 		{
-			"includes": ["dist/**", "dist-web/**", "coverage/**", "node_modules/**"],
+			"includes": [
+				"dist/**",
+				"dist-web/**",
+				"coverage/**",
+				".vitest/**",
+				"node_modules/**"
+			],
 			"linter": {
 				"enabled": false
 			},

@@ -5,6 +5,7 @@ dist-web/
 .env.*
 !.env.example
 coverage/
+.vitest/
 playwright-report/
 test-results/
 *.sqlite*

@@ -1,0 +1,41 @@
+[
+	{
+		"id": "holdout-v3-knowledge-01",
+		"axis": "knowledge",
+		"split": "holdout",
+		"question": "LongFactのモデル規模に関する観測は、どのモデル群・何モデルの結果ですか。大規模なら全タスクで必ず正確になるという結論にしてよいですか。",
+		"query": "LongFact",
+		"expected": [
+			"Gemini、GPT、Claude、PaLM-2の4系列にまたがる13モデルの比較である。",
+			"LongFactで大きなモデルが一般に長文の事実性で良い傾向という限定を保つ。全タスクの必然的な優越に拡張しない。"
+		],
+		"sourceIds": ["0255f538-00e4-40fc-8830-f4ae00e0595f"],
+		"critical": true
+	},
+	{
+		"id": "holdout-v3-episode-01",
+		"axis": "episode",
+		"split": "holdout",
+		"question": "第2ラウンドで実行した2本の検索語と、それぞれが埋めようとした不足を復元してください。",
+		"query": "definitions roles relationship",
+		"expected": [
+			"LLM web search definitions roles relationship と retrieval augmented generation retrieve interpret generate answer を記録に基づいて示す。",
+			"前者は定義・役割差・関係、後者は検索結果の解釈と回答統合の不足を扱う。検索を実行したことと不足が解消したことを区別する。"
+		],
+		"sourceIds": ["1367", "1372", "1382"],
+		"critical": true
+	},
+	{
+		"id": "holdout-v3-retrieval-01",
+		"axis": "retrieval",
+		"split": "holdout",
+		"question": "従来の検索エンジンとLLMを用いた検索では、矛盾する情報を比較する主体について、保存原文はどのような違いを説明していますか。原文根拠も示してください。",
+		"query": "traditional search engines",
+		"expected": [
+			"従来の検索エンジンでは利用者が手作業で比較し、LLMベースでは取得内容をコンテキストへ入れ、モデルが対立する見解を識別・区別・推論することを求められるという説明を回復する。",
+			"f1f8a1bc-22da-4588-ae2a-c4ede1fe30ebの引用、または同じ説明を含む実際に取得した原文範囲を根拠にする。能力の要求を達成保証へ変えない。"
+		],
+		"sourceIds": ["f1f8a1bc-22da-4588-ae2a-c4ede1fe30eb"],
+		"critical": true
+	}
+]

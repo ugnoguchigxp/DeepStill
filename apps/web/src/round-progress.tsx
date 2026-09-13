@@ -223,6 +223,21 @@ export function RoundProgress({ detail }: { detail: JobDetail }) {
 }
 
 export function researchReason(reason: string) {
+	const delivery: Record<string, string> = {
+		saved_evidence_only: "保存済み資料での生成テストを終了",
+		retrieval_recovery_limit: "取得失敗後の再探索上限に達したため停止",
+		retrieval_blocked: "資料の取得が続けて失敗したため停止",
+		token_budget: "残りのトークン予算では続行できないため停止",
+		source_budget: "資料取得の予算に到達",
+		query_budget: "検索回数の上限に到達",
+		no_useful_link: "未確認事項に進む取得候補がないため停止",
+		no_new_understanding: "新しい理解が増えなかったため停止",
+		unresolved_questions: "未解決の問いを残して終了",
+		repeated_search: "同じ検索の反復を防ぐため停止",
+		invalid_deliverable: "引用または成果物形式の検証に失敗",
+		search_timeout: "検索応答の待機上限に到達",
+	};
+	if (delivery[reason]) return delivery[reason];
 	return (
 		(
 			{

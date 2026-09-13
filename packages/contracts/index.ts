@@ -1,16 +1,40 @@
 import { z } from "zod";
 import type { ResearchState } from "../research/rounds";
-export const budgetSchema = z.object({
+const budgetFields = z.object({
 	rounds: z.number().int().min(1).max(50).default(6),
 	queries: z.number().int().min(1).max(500).default(50),
 	urls: z.number().int().min(1).max(1000).default(100),
 	documents: z.number().int().min(1).max(100).default(20),
-	tokens: z.number().int().min(4096).max(1000000).default(100000),
+	tokens: z.number().int().min(4096).max(1100000).default(100000),
+	inputTokens: z.number().int().min(4096).max(1000000).optional(),
+	outputTokens: z.number().int().min(1024).max(100000).optional(),
 	requests: z.number().int().min(1).max(2000).default(200),
 	costUsd: z.number().positive().max(100).default(5),
 	depth: z.number().int().min(0).max(10).default(5),
 	wallMs: z.number().int().min(1000).max(7200000).default(7200000),
 });
+// Explicit legacy totals retain their original semantics. New budgets use two caps.
+export const budgetSchema = z.preprocess((value) => {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+	const b = value as Record<string, unknown>;
+	if (
+		b.tokens !== undefined &&
+		b.inputTokens === undefined &&
+		b.outputTokens === undefined
+	)
+		return b;
+	const inputTokens = b.inputTokens ?? 1000000;
+	const outputTokens = b.outputTokens ?? 100000;
+	return {
+		...b,
+		inputTokens,
+		outputTokens,
+		tokens:
+			typeof inputTokens === "number" && typeof outputTokens === "number"
+				? inputTokens + outputTokens
+				: b.tokens,
+	};
+}, budgetFields);
 export const createJobSchema = z.object({
 	engineVersion: z.union([z.literal(1), z.literal(2)]).default(2),
 	topic: z.string().trim().min(2).max(400),
@@ -26,7 +50,7 @@ export type Budget = z.infer<typeof budgetSchema>;
 export type Usage = Record<
 	"queries" | "urls" | "documents" | "tokens" | "requests" | "costUsd",
 	number
->;
+> & { inputTokens?: number; outputTokens?: number };
 export type Status =
 	| "queued"
 	| "running"
@@ -67,8 +91,35 @@ export interface Hit {
 	snippet: string;
 	rank: number;
 }
+export interface PdfPage {
+	page: number;
+	/** UTF-16 offsets in the final Snapshot.text; empty for unread pages. */
+	start: number;
+	end: number;
+	status: "extracted" | "partial" | "unread" | "blank";
+	method: "embedded-text";
+	layout: "single-column" | "two-column" | "uncertain";
+	warnings: string[];
+}
+export interface PdfMetadata {
+	rawHash: string;
+	pages: number;
+	/** Optional for snapshots created before PDF coverage tracking. */
+	pageMap?: PdfPage[];
+	omittedPages?: { from: number; to: number; reason: string }[];
+	coverage?: "text-extracted" | "partial" | "unread";
+	warnings?: string[];
+}
 export interface Snapshot {
-	pdf?: { rawHash: string; pages: number };
+	links?: {
+		url: string;
+		text: string;
+		context: string;
+		kind: "continuation" | "reference";
+		section: string;
+	}[];
+	headings?: string[];
+	pdf?: PdfMetadata;
 	decoding?: { encoding: string; rawHash: string };
 	author: string | null;
 	publishedAt: string | null;
@@ -104,7 +155,7 @@ export interface Claim {
 	relatedClaimIds: string[];
 }
 export interface Artifact {
- memoryId?: string;
+	memoryId?: string;
 	evidenceUnavailable?: boolean;
 	qualityState?: "reviewed" | "needs_revision";
 	sections?: ReportSection[];
@@ -119,7 +170,7 @@ export interface Artifact {
 	fixture: boolean;
 }
 export interface Candidate {
- memoryId?: string;
+	memoryId?: string;
 	artifactVersion?: number;
 	eventIds?: number[];
 	id: string;
@@ -136,8 +187,13 @@ export interface Event {
 	createdAt: number;
 }
 export interface JobDetail {
- memory?: import("../memory/schema").MemoryBundle[];
- memoryBrief?: import("../research/rounds").Brief;
+	importedRun?: {
+		importedAt: string;
+		execution: string;
+		originalEventIdsPreserved: boolean;
+	};
+	memory?: import("../memory/schema").MemoryBundle[];
+	memoryBrief?: import("../research/rounds").Brief;
 	research?: ResearchState;
 	qualityReviews?: {
 		version: number;

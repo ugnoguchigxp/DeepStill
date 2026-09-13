@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -727,7 +727,10 @@ test("live pipeline gates query, source and claim scope, then edits and reviews 
 		};
 		await run(new Engine(s.store, () => providers, s.dir), job.id);
 		expect(s.store.detail(job.id)?.artifacts).toHaveLength(0);
-		expect(s.store.getJob(job.id)?.status).toBe("partial");
+		expect(
+			s.store.getJob(job.id)?.status,
+			s.store.getJob(job.id)?.reason ?? "",
+		).toBe("partial");
 		s.store.resume(job.id);
 		await run(new Engine(s.store, () => providers, s.dir), job.id);
 		const detail = s.store.detail(job.id);

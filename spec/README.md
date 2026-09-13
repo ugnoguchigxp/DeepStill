@@ -9,6 +9,9 @@
 | [ラウンド探索の実装計画](round-research-plan.md) | 次期探索の正本。逐次キュー、LLMによる回答十分性評価、残予算を使う補足・トリビア探索 |
 | [ラウンド探索計画の採点](round-research-review.md) | 固定基準による78→91→95点の改訂記録と残課題 |
 | [ラウンド探索v2の実装記録](round-research-implementation.md) | 実装範囲、計画から具体化した点、検証結果、LocalLLM実測の残件 |
+| [Memory先行・品質改善計画](memory-first-research-plan.md) | Memory先行設計を継承し、実内容の欠陥を原文再読・修正・探索・再検査まで閉じる次の実装範囲と完了条件 |
+| [Memory先行v1の実装記録](memory-first-implementation.md) | 現在の実装、実生成の失敗と未達、評価ハーネスの制約 |
+| [途中レビュー改善記録](round-quality-improvement.md) | レポート72→58→64→71→67の失敗記録と改善計画の経緯 |
 | [コンセプト](concept.md) | 元のplan.mdにあった目的、原則、将来像を保存。実装計画との差は具体化・段階化として扱う |
 | [依存パッケージ評価](dependency-evaluation.md) | hono-standard、llm-fetch、spec-html、s11tnextの確認結果と制約 |
 
@@ -26,3 +29,11 @@ bun run docs:check
 アプリの起動・運用手順はリポジトリ直下のREADMEを参照。
 
 - [「LLMと宗教」実調査・改善記録](llm-religion-evaluation.md)
+
+- [Memory中心の逐次探索：改善実装と検証](memory-first-improvement-implementation.md)
+
+- [Memory探索の残課題と充足検証](memory-first-fulfillment.md)
+
+- [探索制御とSystemContextの契約修正・再評価](research-control-contract-review.md)
+
+- [PDF本文抽出・ページ引用・品質評価](pdf-reading.md)

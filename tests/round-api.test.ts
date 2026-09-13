@@ -1,4 +1,4 @@
-import { test, expect } from "bun:test";
+import { test, expect } from "vitest";
 import { Store } from "../packages/db";
 import { createJobSchema } from "../packages/contracts";
 import { createApp } from "../apps/api/app";

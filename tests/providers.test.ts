@@ -1,4 +1,4 @@
-import { test, expect } from "bun:test";
+import { test, expect } from "vitest";
 import { DataForSeo } from "../packages/search-provider";
 import { CompatibleLlm } from "../packages/llm-provider";
 import { ContextStillMcp } from "../packages/integrations/contextstill";
@@ -54,7 +54,7 @@ test("DataForSEO separates autocomplete/live, task_post, and polling", async () 
 	expect((await p.suggest("topic", signal)).suggestions).toEqual(["related"]);
 	expect((await p.submit("topic", signal)).id).toBe("task-id");
 	expect((await p.poll("task-id", signal)).hits).toHaveLength(1);
-	expect(calls[2]).toEndWith("/task_get/advanced/task-id");
+	expect(calls[2]).toMatch(/\/task_get\/advanced\/task-id$/);
 });
 test("DataForSEO pending task is not empty successful search", async () => {
 	const p = new DataForSeo(
@@ -181,4 +181,27 @@ test("candidate adoption cannot mutate a historical artifact version", async () 
 	} finally {
 		s.close();
 	}
+});
+
+test("compatible LLM preserves separate input and output usage without adding cached or reasoning subsets", async () => {
+	const p = new CompatibleLlm(
+		"http://localhost/v1",
+		"test",
+		"",
+		fake(() =>
+			Response.json({
+				choices: [{ message: { content: "{}" } }],
+				usage: {
+					total_tokens: 150,
+					prompt_tokens: 100,
+					completion_tokens: 50,
+					prompt_tokens_details: { cached_tokens: 80 },
+					completion_tokens_details: { reasoning_tokens: 30 },
+				},
+			}),
+		),
+	);
+	const result = await p.complete("scope", "{}", signal);
+	expect(result.usage).toBe(150);
+	expect(result.tokenUsage).toEqual({ inputTokens: 100, outputTokens: 50 });
 });

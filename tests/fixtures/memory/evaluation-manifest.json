@@ -1,0 +1,19 @@
+{
+	"version": "memory-evaluation-v2",
+	"scoringVersion": "axis-case-equal-v1",
+	"sourceCaseHash": "46e0293423701c6a5c09f75103eefe8f0d758f082ad5239fde0383936de80f55",
+	"development": "llm-web-development-v2.json",
+	"holdout": null,
+	"reason": "The v1 cases were present during implementation and their independent holdout-use provenance cannot be established. Historical split labels are retained in the original file, but all 30 are development in v2.",
+	"promptReplacements": {
+		"evaluate_round": "research_direction_review",
+		"review_opportunities": "research_action_select"
+	},
+	"qualityGate": {
+		"knowledge": ">90",
+		"episode": ">90",
+		"retrieval": ">90",
+		"criticalDefects": 0,
+		"sequentialHoldoutRuns": 3
+	}
+}

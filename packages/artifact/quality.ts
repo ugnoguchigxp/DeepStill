@@ -46,6 +46,7 @@ export const reviewWeights = {
 	episode: 5,
 } as const;
 export const reviewSchema = z.object({
+	researchNeeded: z.boolean().default(false),
 	scores: z.object({
 		scope: z.number().min(0).max(5),
 		support: z.number().min(0).max(5),

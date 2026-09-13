@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +15,17 @@ function setup() {
 	const dir = mkdtempSync(join(tmpdir(), "round-test-"));
 	const store = new Store(join(dir, "test.db"));
 	store.migrate();
+	// Preserve v1 regression fixtures; v2 control has dedicated direction tests.
+	const create = store.create.bind(store);
+	store.create = (input) => {
+		const job = create(input);
+		job.config.researchControlVersion = 1;
+		job.config.researchFlow = "legacy";
+		if (job.mode === "live")
+			job.config.searchProvider = process.env.SEARCH_PROVIDER || "dataforseo";
+		store.saveJob(job);
+		return job;
+	};
 	return {
 		dir,
 		store,
@@ -130,7 +141,10 @@ test("cancel and resume preserve selected set and completed operations", async (
 		s.store.resume(j.id);
 		await run(e, j.id);
 		expect(s.store.research(j.id).rounds[0].selected).toEqual(round.selected);
-		expect(s.store.getJob(j.id)?.status).toBe("completed");
+		expect(
+			s.store.getJob(j.id)?.status,
+			s.store.getJob(j.id)?.reason ?? "",
+		).toBe("completed");
 	} finally {
 		s.close();
 	}
@@ -258,7 +272,7 @@ test("pending external search prevents another job from starting", async () => {
 		expect(await e.tick(b.id)).toBe(false);
 		expect(s.store.getJob(b.id)?.status).toBe("queued");
 		await e.tick(a.id);
-		expect(s.store.slot().operation_key).toStartWith("pending:");
+		expect(s.store.slot().operation_key).toMatch(/^pending:/);
 	} finally {
 		s.close();
 	}
@@ -273,7 +287,10 @@ test("review maintenance is queued and processed without duplicating artifact ve
 		const work = s.store.queueMaintenance(j.id, "review");
 		expect(work.status).toBe("pending");
 		await run(e, j.id);
-		expect(s.store.getJob(j.id)?.status).toBe("completed");
+		expect(
+			s.store.getJob(j.id)?.status,
+			s.store.getJob(j.id)?.reason ?? "",
+		).toBe("completed");
 		expect(s.store.detail(j.id)?.artifacts[0].id).toBe(before.id);
 		expect(s.store.detail(j.id)?.artifacts).toHaveLength(1);
 	} finally {
@@ -393,7 +410,10 @@ test("live-mode final review repairs once and uses the same serialized ledger", 
 			s.dir,
 		);
 		await run(e, j.id);
-		expect(s.store.getJob(j.id)?.status).toBe("completed");
+		expect(
+			s.store.getJob(j.id)?.status,
+			s.store.getJob(j.id)?.reason ?? "",
+		).toBe("completed");
 		expect(reviews).toBe(2);
 		expect(
 			s.store.workItems(j.id).filter((w) => w.kind === "edit"),
@@ -426,7 +446,10 @@ test("confirmed invalid LLM response retries once without poisoning the global s
 			s.dir,
 		);
 		await run(e, j.id);
-		expect(s.store.getJob(j.id)?.status).toBe("completed");
+		expect(
+			s.store.getJob(j.id)?.status,
+			s.store.getJob(j.id)?.reason ?? "",
+		).toBe("completed");
 		expect(n).toBe(2);
 		expect(s.store.slot().state).toBe("idle");
 	} finally {
@@ -465,7 +488,10 @@ test("next candidate added during evaluation causes evaluation of the new revisi
 		);
 		await run(e, j.id);
 		expect(candidateCounts).toEqual([0, 1]);
-		expect(s.store.getJob(j.id)?.status).toBe("completed");
+		expect(
+			s.store.getJob(j.id)?.status,
+			s.store.getJob(j.id)?.reason ?? "",
+		).toBe("completed");
 		expect(s.store.research(j.id).candidates[0].status).toBe("evaluated");
 	} finally {
 		s.close();
@@ -710,7 +736,10 @@ test("candidate changes during independent review invalidate the cached evaluati
 		await run(e, j.id);
 		expect(sawNewCandidate).toBe(true);
 		expect(audits).toBe(2);
-		expect(s.store.getJob(j.id)?.status).toBe("completed");
+		expect(
+			s.store.getJob(j.id)?.status,
+			s.store.getJob(j.id)?.reason ?? "",
+		).toBe("completed");
 	} finally {
 		s.close();
 	}

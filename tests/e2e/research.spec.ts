@@ -33,6 +33,13 @@ test("research completes and citation opens the immutable evidence", async ({
 	await expect(
 		page.getByRole("heading", { name: "Research Artifact" }),
 	).toBeVisible();
+	await page.getByRole("tab", { name: "Knowledge・Episode" }).click();
+	await expect(
+		page.getByRole("heading", { name: "再利用する知識と記憶" }),
+	).toBeVisible();
+	await expect(
+		page.getByRole("link", { name: "Memory JSONを開く ↗" }),
+	).toBeVisible();
 	await page.getByRole("tab", { name: "探索経路" }).click();
 	await expect(
 		page.getByRole("heading", { name: "Query Frontier" }),

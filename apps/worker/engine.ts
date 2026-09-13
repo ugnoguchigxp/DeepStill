@@ -1,3 +1,6 @@
+import { splitTokenReservation } from "../../packages/research/budget";
+import { pdfReadNotice } from "../../packages/core/pdf";
+import { DeliverableEngine } from "./deliverable-engine";
 import {
 	finalHold,
 	evaluationHold,
@@ -133,6 +136,13 @@ export class Engine {
 		if (old?.state === "done") return old.result as T;
 		if (old) throw new Error("EXTERNAL_RESULT_UNKNOWN");
 		const current = this.store.getJob(t.job_id) as Job;
+		if (amount.tokens !== undefined) {
+			amount = {
+				...amount,
+				inputTokens: amount.inputTokens ?? amount.tokens,
+				outputTokens: amount.outputTokens ?? amount.tokens,
+			};
+		}
 		if (
 			current.config.engineVersion !== 2 &&
 			!id.startsWith("synthesis:") &&
@@ -150,13 +160,19 @@ export class Engine {
 				throw new BudgetExceeded();
 		}
 		this.store.atomic(() => {
-			if (current.config.engineVersion === 2) {
-				const finalStage = id.includes(":memory-final:") || ["synthesize", "edit", "review"].some((k) =>
-					id.includes(`:${k}:`),
-				);
+			if (
+				current.config.engineVersion === 2 &&
+				current.config.researchFlow !== "deliverables-v1"
+			) {
+				const finalStage =
+					id.includes(":memory-final:") ||
+					["synthesize", "edit", "review"].some((k) => id.includes(`:${k}:`));
 				const evaluating =
 					id.includes(":evaluate_round:") ||
-					id.includes(":review_opportunities:") || id.includes(":memory_");
+					id.includes(":research_direction_review:") ||
+					id.includes(":research_action_select:") ||
+					id.includes(":review_opportunities:") ||
+					id.includes(":memory_");
 				const holds = [finalHold(current), evaluationHold(current)];
 				if (finalStage) for (const h of holds) h.state = "released";
 				else if (evaluating) holds[1].state = "released";
@@ -218,10 +234,16 @@ export class Engine {
 						state: "settled",
 						amount,
 						resultUsage: (result as { usage?: number })?.usage ?? null,
+						resultTokenUsage:
+							(result as { tokenUsage?: unknown })?.tokenUsage ?? null,
+						usageEstimated:
+							amount.tokens !== undefined &&
+							!(result as { tokenUsage?: unknown })?.tokenUsage,
 					});
 				const value = (result ?? {}) as {
 					cost?: number;
 					usage?: number | null;
+					tokenUsage?: { inputTokens: number; outputTokens: number };
 				};
 				const j = this.store.getJob(t.job_id);
 				if (j) {
@@ -238,11 +260,25 @@ export class Engine {
 					if (typeof value.usage === "number" && amount.tokens !== undefined) {
 						j.usage.tokens += value.usage - amount.tokens;
 					}
+					// Missing directional usage retains the reservation, never fabricates a split.
+					for (const key of ["inputTokens", "outputTokens"] as const) {
+						const actual = value.tokenUsage?.[key];
+						if (
+							actual !== undefined &&
+							(!Number.isSafeInteger(actual) || actual < 0)
+						)
+							throw new Error("INVALID_PROVIDER_USAGE");
+						if (actual !== undefined && amount[key] !== undefined)
+							j.usage[key] = (j.usage[key] ?? 0) + actual - amount[key]!;
+					}
 					this.store.saveJob(j);
 					this.store.event(j.id, "operation.completed", {
 						id,
 						actualCost: value.cost,
 						actualTokens: value.usage,
+						actualTokenUsage: value.tokenUsage ?? null,
+						tokenUsageEstimated:
+							amount.tokens !== undefined && !value.tokenUsage,
 					});
 				}
 			});
@@ -252,7 +288,9 @@ export class Engine {
 				if (
 					error instanceof SearchProviderError ||
 					error instanceof LlmFetchError ||
-					id.startsWith("crawl:")
+					id.startsWith("crawl:") ||
+					(error instanceof Error &&
+						error.message.includes("invalid_json_schema"))
 				)
 					this.store.markExternal(t, null);
 				else
@@ -334,6 +372,22 @@ export class Engine {
 	}
 	async step(t: Task, signal: AbortSignal) {
 		const roundJob = this.store.getJob(t.job_id);
+		if (
+			roundJob?.config.researchFlow === "deliverables-v1" &&
+			!roundJob.config.maintenance
+		) {
+			try {
+				return await new DeliverableEngine(
+					this,
+					this.providers(roundJob),
+					this.exportRoot,
+				).step(t, signal);
+			} catch (error) {
+				if (error instanceof LeaseLost) throw error;
+				this.finish(t, JSON.parse(t.payload), "failed", this.errorCode(error));
+				return;
+			}
+		}
 		if (roundJob?.config.engineVersion === 2 || roundJob?.config.maintenance) {
 			try {
 				return await new RoundEngine(
@@ -736,6 +790,7 @@ export class Engine {
 						title: source.title,
 						url: source.finalUrl,
 						fetchedAt: source.fetchedAt,
+						readingNotice: pdfReadNotice(source.pdf),
 					},
 					passages,
 					existingClaims: previous.map((c) => ({ id: c.id, text: c.text })),
@@ -752,7 +807,11 @@ export class Engine {
 				const result = await this.operation(
 					t,
 					`llm:${source.id}`,
-					{ documents: 1, tokens: reserve, requests: 1 },
+					{
+						documents: 1,
+						...splitTokenReservation(reserve, 2048),
+						requests: 1,
+					},
 					() => p.llm.complete("extract", input, signal),
 				);
 				const extracted = claimResponse.safeParse(this.parse(result.text));
@@ -902,7 +961,7 @@ export class Engine {
 				const result = await this.operation(
 					t,
 					`synthesis:${job.config.generationAttempt ?? 0}`,
-					{ tokens: reserve, requests: 1 },
+					{ ...splitTokenReservation(reserve, 8192), requests: 1 },
 					() => p.llm.complete("synthesize", input, signal),
 				);
 				let finalResult = result;
@@ -923,9 +982,11 @@ export class Engine {
 						t,
 						`synthesis:${job.config.generationAttempt ?? 0}:edit`,
 						{
-							tokens:
+							...splitTokenReservation(
 								tokenReservation(editInput, "edit") +
-								(job.config.llmProvider === "codex" ? 20000 : 0),
+									(job.config.llmProvider === "codex" ? 20000 : 0),
+								8192,
+							),
 							requests: 1,
 						},
 						() => p.llm.complete("edit", editInput, signal),
@@ -1002,9 +1063,11 @@ export class Engine {
 						t,
 						`synthesis:${job.config.generationAttempt ?? 0}:review`,
 						{
-							tokens:
+							...splitTokenReservation(
 								tokenReservation(reviewInput, "review") +
-								(job.config.llmProvider === "codex" ? 20000 : 0),
+									(job.config.llmProvider === "codex" ? 20000 : 0),
+								2048,
+							),
 							requests: 1,
 						},
 						() => p.llm.complete("review", reviewInput, signal),
@@ -1136,9 +1199,11 @@ export class Engine {
 			t,
 			`scope:${key}`,
 			{
-				tokens:
+				...splitTokenReservation(
 					tokenReservation(input, "scope") +
-					(job.config.llmProvider === "codex" ? 20000 : 0),
+						(job.config.llmProvider === "codex" ? 20000 : 0),
+					2048,
+				),
 				requests: 1,
 			},
 			() => p.llm.complete("scope", input, signal),

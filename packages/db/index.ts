@@ -1,3 +1,4 @@
+import { configuredCodexModel } from "../llm-provider/codex";
 import { Database } from "bun:sqlite";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -34,6 +35,8 @@ const zero = (): Usage => ({
 	urls: 0,
 	documents: 0,
 	tokens: 0,
+	inputTokens: 0,
+	outputTokens: 0,
 	requests: 0,
 	costUsd: 0,
 });
@@ -157,6 +160,11 @@ export class Store {
 	create(input: JobInput) {
 		return this.atomic(() => {
 			const now = Date.now();
+			const useDelivery =
+				input.mode === "live" &&
+				input.engineVersion !== 1 &&
+				process.env.ROUND_ENGINE_ENABLED !== "0" &&
+				process.env.DELIVERABLE_FLOW_ENABLED !== "0";
 			const j: Job = {
 				...input,
 				id: uid(),
@@ -169,6 +177,7 @@ export class Store {
 				updatedAt: now,
 				config: {
 					strategyVersion: "round-v2",
+					researchFlow: useDelivery ? "deliverables-v1" : "legacy",
 					searchExecutionGuarantee:
 						process.env.SEARCH_PROVIDER === "codex"
 							? "provider_managed"
@@ -184,17 +193,31 @@ export class Store {
 					searchProvider:
 						input.mode === "mock"
 							? "fixture"
-							: process.env.SEARCH_PROVIDER || "dataforseo",
+							: useDelivery && process.env.SEARCH_PROVIDER !== "dataforseo"
+								? "direct"
+								: process.env.SEARCH_PROVIDER || "dataforseo",
 					reasoning: process.env.LLM_PROVIDER === "codex" ? "low" : null,
 					llmModel:
 						input.mode === "mock"
 							? "fixture-v1"
 							: process.env.LLM_PROVIDER === "codex"
-								? "gpt-5.6-luna"
+								? configuredCodexModel()
 								: process.env.LLM_MODEL,
-					extractor: "llm-fetch@0.1.0",
-					promptVersion: "5",
- memoryVersion: 1,
+					extractor: "llm-fetch@0.1.1",
+					promptVersion: "6",
+					deliverableUpdateMode:
+						input.mode === "live" ? "incremental-slots-v2" : "full-draft",
+					memoryVersion: process.env.MEMORY_FIRST_ENABLED === "0" ? 0 : 1,
+					researchControlVersion:
+						process.env.MEMORY_FIRST_ENABLED === "0" ? 1 : 2,
+					actionCandidateLimit: 3,
+					memoryContextBytes: Number(
+						process.env.MEMORY_CONTEXT_BYTES ?? 160000,
+					),
+					sourceRangeBytes: Number(process.env.SOURCE_RANGE_BYTES ?? 12000),
+					sourceRangeLimit: Number(process.env.SOURCE_RANGE_LIMIT ?? 8),
+					providerInputBytes: Number(process.env.LLM_INPUT_BYTES ?? 200000),
+					providerCapabilitiesVerified: false,
 					searchRequestUsd: Number(
 						process.env.DATAFORSEO_MAX_REQUEST_USD || 0.1,
 					),
@@ -249,7 +272,7 @@ export class Store {
 			.run(jobId, type, JSON.stringify(data), Date.now());
 	}
 	events(jobId: string, after = 0): Event[] {
-		return (
+		const native = (
 			this.sql
 				.query(
 					"SELECT * FROM events WHERE job_id=? AND id>? ORDER BY id LIMIT 500",
@@ -268,20 +291,28 @@ export class Store {
 			data: JSON.parse(r.data),
 			createdAt: r.created_at,
 		}));
+		const imported = this.all<Event>(jobId, "imported_event").filter(
+			(e) => e.id > after,
+		);
+		return [...native, ...imported].sort((a, b) => a.id - b.id).slice(0, 500);
 	}
 	detail(id: string): JobDetail | null {
 		const job = this.getJob(id);
 		if (!job) return null;
 		return {
 			job,
+			importedRun: this.record(id, "import_origin", "origin"),
 			queries: this.all(id, "query"),
 			edges: this.all(id, "edge"),
 			sources: this.all(id, "source"),
 			evidence: this.all(id, "evidence"),
 			claims: this.all(id, "claim"),
 			qualityReviews: this.all(id, "quality_review"),
- memory: this.all<import("../memory/schema").MemoryBundle>(id, "memory").sort((a,b)=>b.asOf.localeCompare(a.asOf)),
- memoryBrief: this.record(id, "brief", "brief") ?? undefined,
+			memory: this.all<import("../memory/schema").MemoryBundle>(
+				id,
+				"memory",
+			).sort((a, b) => b.asOf.localeCompare(a.asOf)),
+			memoryBrief: this.record(id, "brief", "brief") ?? undefined,
 			artifacts: this.all<import("../contracts").Artifact>(id, "artifact").sort(
 				(a, b) => b.version - a.version,
 			),
@@ -296,8 +327,10 @@ export class Store {
 					Number(
 						(
 							this.sql
-								.query("SELECT max(id) AS id FROM events WHERE job_id=?")
-								.get(id) as { id: number | null }
+								.query(
+									"SELECT max(id) AS id FROM (SELECT id FROM events WHERE job_id=? UNION ALL SELECT CAST(id AS INTEGER) FROM records WHERE job_id=? AND kind='imported_event')",
+								)
+								.get(id, id) as { id: number | null }
 						).id ?? 0,
 					) - 500,
 				),
@@ -382,8 +415,15 @@ export class Store {
 					)) &&
 				!invalidReasons.includes(j.reason || "");
 			if (!canPublishCached)
-				for (const key of ["tokens", "requests"] as const) {
-					if (j.usage[key] >= j.budget[key])
+				for (const key of [
+					"tokens",
+					"inputTokens",
+					"outputTokens",
+					"requests",
+				] as const) {
+					if (
+						(j.usage[key] ?? 0) >= (j.budget[key] ?? Number.POSITIVE_INFINITY)
+					)
 						throw new Error("RESUME_BUDGET_EXHAUSTED");
 				}
 			if (
@@ -397,6 +437,40 @@ export class Store {
 					)
 					.run(id, `synthesis:${j.config.generationAttempt ?? 0}`);
 			const previousStatus = j.status;
+			if (j.config.researchFlow === "deliverables-v1" && phase === "publish") {
+				const state = JSON.parse(task.payload);
+				const target = state.queue?.find(
+					(q: { url: string }) => !state.attempted.includes(q.url),
+				);
+				const source = this.all<import("../contracts").Snapshot>(
+					id,
+					"source",
+				).find((s) => (state.cursors[s.id] ?? 0) < s.text.length);
+				if (source)
+					state.next = {
+						kind: "read",
+						sourceId: source.id,
+						purpose: "未読の続きを調べる",
+					};
+				else if (target)
+					state.next = {
+						kind: "fetch",
+						url: target.url,
+						purpose: "残っている取得候補を確認する",
+					};
+				else if (j.usage.queries >= j.budget.queries)
+					throw Error("JOB_NOT_RESUMABLE");
+				state.phase = source ? "act" : "write";
+				state.content = undefined;
+				state.repair = undefined;
+				state.failures = 0;
+				state.noGain = 0;
+				state.satisfied = false;
+				state.reason = "";
+				this.sql
+					.query("UPDATE tasks SET payload=? WHERE id=?")
+					.run(JSON.stringify(state), task.id);
+			}
 			if (j.config.engineVersion === 2)
 				for (const item of this.workItems(id)) {
 					if (item.status === "running") {
@@ -535,12 +609,13 @@ export class Store {
 				if (
 					n < 0 ||
 					!Number.isFinite(n) ||
-					j.usage[key] + n > j.budget[key] + 1e-9
+					(j.usage[key] ?? 0) + n >
+						(j.budget[key] ?? Number.POSITIVE_INFINITY) + 1e-9
 				)
 					throw new BudgetExceeded();
 			}
 			for (const key of Object.keys(amount) as (keyof Usage)[])
-				j.usage[key] += amount[key] ?? 0;
+				j.usage[key] = (j.usage[key] ?? 0) + (amount[key] ?? 0);
 			this.saveJob(j);
 			this.event(j.id, "budget.reserved", amount);
 		});
@@ -557,7 +632,9 @@ export class Store {
 			if (
 				Date.now() >= (j.deadline ?? 0) ||
 				j.usage.requests >= j.budget.requests ||
-				j.usage.tokens >= j.budget.tokens
+				j.usage.tokens >= j.budget.tokens ||
+				(j.usage.inputTokens ?? 0) >= (j.budget.inputTokens ?? Infinity) ||
+				(j.usage.outputTokens ?? 0) >= (j.budget.outputTokens ?? Infinity)
 			)
 				throw new Error("RESUME_BUDGET_EXHAUSTED");
 			j.config.maintenance = { previousStatus: j.status, kind };
@@ -656,6 +733,11 @@ export class Store {
 		const slot = this.slot();
 		return {
 			version: 2,
+			questions: this.all(jobId, "question"),
+			actions: this.all(jobId, "action"),
+			decisions: this.all(jobId, "decision"),
+			outcomes: this.all(jobId, "outcome"),
+			gaps: this.all(jobId, "gap"),
 			holds: this.all(jobId, "budget_hold"),
 			revision: meta?.revision ?? 0,
 			sufficient: meta?.sufficient ?? null,

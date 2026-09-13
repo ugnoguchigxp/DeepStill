@@ -27,6 +27,7 @@ export class CodexSearch implements SearchProvider {
 			suggestions: suggestionSchema.parse(JSON.parse(r.text)).suggestions,
 			cost: 0,
 			usage: r.usage,
+			tokenUsage: r.tokenUsage,
 			audit: r.audit,
 		};
 	}
@@ -46,6 +47,7 @@ export class CodexSearch implements SearchProvider {
 			...hitSchema.parse(JSON.parse(r.text)),
 			cost: 0,
 			usage: r.usage,
+			tokenUsage: r.tokenUsage,
 			audit: r.audit,
 		};
 	}

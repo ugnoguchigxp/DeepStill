@@ -1,10 +1,14 @@
+import { DirectSearch } from "../../packages/search-provider/direct";
 import { codeVersion, publishWorker } from "../../packages/runtime";
 import type { Job } from "../../packages/contracts";
 import { Store } from "../../packages/db";
 import { Engine, mocks, type Providers } from "./engine";
 import { DataForSeo } from "../../packages/search-provider";
 import { liveCrawler } from "../../packages/crawler";
-import { CodexLlm } from "../../packages/llm-provider/codex";
+import {
+	CodexLlm,
+	configuredCodexModel,
+} from "../../packages/llm-provider/codex";
 import { CodexSearch } from "../../packages/search-provider/codex";
 import { CompatibleLlm } from "../../packages/llm-provider";
 import {
@@ -14,27 +18,30 @@ import {
 export function configuredProviders(job?: Job): Providers {
 	return {
 		search:
-			(job?.config.searchProvider ?? process.env.SEARCH_PROVIDER) === "codex"
-				? new CodexSearch()
-				: new DataForSeo(
-						process.env.DATAFORSEO_LOGIN || "",
-						process.env.DATAFORSEO_PASSWORD || "",
-						fetch,
-						Number(
-							job?.config.searchLocationCode ??
-								process.env.DATAFORSEO_LOCATION_CODE ??
-								2392,
+			job?.config.searchProvider === "direct"
+				? new DirectSearch()
+				: (job?.config.searchProvider ?? process.env.SEARCH_PROVIDER) ===
+						"codex"
+					? new CodexSearch()
+					: new DataForSeo(
+							process.env.DATAFORSEO_LOGIN || "",
+							process.env.DATAFORSEO_PASSWORD || "",
+							fetch,
+							Number(
+								job?.config.searchLocationCode ??
+									process.env.DATAFORSEO_LOCATION_CODE ??
+									2392,
+							),
+							String(
+								job?.config.searchLanguageCode ??
+									process.env.DATAFORSEO_LANGUAGE_CODE ??
+									"ja",
+							),
 						),
-						String(
-							job?.config.searchLanguageCode ??
-								process.env.DATAFORSEO_LANGUAGE_CODE ??
-								"ja",
-						),
-					),
 		crawler: liveCrawler(),
 		llm:
 			(job?.config.llmProvider ?? process.env.LLM_PROVIDER) === "codex"
-				? new CodexLlm()
+				? new CodexLlm(String(job?.config.llmModel ?? configuredCodexModel()))
 				: new CompatibleLlm(
 						String(
 							job?.config.llmBaseUrl ??

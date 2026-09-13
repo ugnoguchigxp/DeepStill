@@ -1,4 +1,11 @@
 import {
+	pdfEvidencePages,
+	pdfEvidenceUrl,
+	pdfReadNotice,
+} from "../../../packages/core/pdf";
+import { ResearchEvent } from "./research-event";
+import { DeliverableMemory } from "./deliverable-memory";
+import {
 	QueryClient,
 	QueryClientProvider,
 	useMutation,
@@ -46,7 +53,7 @@ function Status({ job }: { job: Job }) {
 		</span>
 	);
 }
-function App() {
+export function App() {
 	const cache = useQueryClient();
 	const [deleteTarget, setDeleteTarget] = useState<Job | null>(null);
 	const [selected, setSelected] = useState<string | null>(() =>
@@ -61,7 +68,8 @@ function App() {
 		rounds: 6,
 		queries: 50,
 		urls: 100,
-		tokens: 1000000,
+		inputTokens: 1000000,
+		outputTokens: 100000,
 		wallMs: 7200000,
 		documents: 20,
 		requests: 200,
@@ -220,13 +228,17 @@ function App() {
 							<button
 								type="button"
 								className={`job-link ${selected === job.id ? "selected" : ""}`}
+								title={`${job.topic} · ${statusLabel[job.status]} · 更新 ${new Date(job.updatedAt).toLocaleString("ja-JP")}`}
+								aria-current={selected === job.id ? "page" : undefined}
 								onClick={() => choose(job.id)}
 							>
 								<span>{job.topic}</span>
-								<small>
-									{statusLabel[job.status]} ·{" "}
-									{job.mode === "mock" ? "検証" : "Web"}
-								</small>
+								<time dateTime={new Date(job.updatedAt).toISOString()}>
+									{new Date(job.updatedAt).toLocaleDateString("ja-JP", {
+										month: "numeric",
+										day: "numeric",
+									})}
+								</time>
 							</button>
 							<button
 								type="button"
@@ -309,7 +321,9 @@ function App() {
 									/ 検索:{" "}
 									{config.data?.searchProvider === "codex"
 										? "Codex Web"
-										: "DataForSEO"}
+										: config.data?.searchProvider === "direct"
+											? "DuckDuckGo（LLM処理なし）"
+											: "DataForSEO"}
 								</small>
 							</label>
 							<label>
@@ -329,7 +343,8 @@ function App() {
 										[
 											["queries", "Query上限"],
 											["urls", "URL上限"],
-											["tokens", "Token上限"],
+											["inputTokens", "入力Token上限"],
+											["outputTokens", "出力Token上限"],
 											["wallMs", "時間上限（分）"],
 											["documents", "解析文書上限"],
 											["requests", "リクエスト上限"],
@@ -347,7 +362,7 @@ function App() {
 													key === "wallMs" ? budget[key] / 60000 : budget[key]
 												}
 												min={
-													key === "tokens"
+													key === "inputTokens"
 														? 4096
 														: key === "depth"
 															? 0
@@ -410,6 +425,11 @@ function App() {
 								<div>
 									<div className="eyebrow">RESEARCH / {j.id.slice(0, 8)}</div>
 									<h2>{j.topic}</h2>
+									{d?.importedRun && (
+										<p>
+											評価実行から取り込んだ記録です。元の検索履歴・根拠・結果を表示しています。
+										</p>
+									)}
 									<p>
 										{new Date(j.createdAt).toLocaleString("ja-JP")} ·{" "}
 										{j.strategy} ·{" "}
@@ -418,19 +438,21 @@ function App() {
 								</div>
 								<div className="actions">
 									<Status job={j} />
-									{["cancelled", "failed", "partial"].includes(j.status) && (
-										<button
-											type="button"
-											className="secondary"
-											disabled={
-												resume.isPending ||
-												(j.mode === "live" && !config.data?.liveReady)
-											}
-											onClick={() => resume.mutate()}
-										>
-											{resume.isPending ? "再開しています…" : "探索を再開"}
-										</button>
-									)}
+									{!d?.importedRun &&
+										!j.config.deliveryReplay &&
+										["cancelled", "failed", "partial"].includes(j.status) && (
+											<button
+												type="button"
+												className="secondary"
+												disabled={
+													resume.isPending ||
+													(j.mode === "live" && !config.data?.liveReady)
+												}
+												onClick={() => resume.mutate()}
+											>
+												{resume.isPending ? "再開しています…" : "探索を再開"}
+											</button>
+										)}
 									{!["completed", "partial", "failed", "cancelled"].includes(
 										j.status,
 									) && (
@@ -480,7 +502,7 @@ function App() {
 									CLIを利用できません。新しいCLIをインストールするか、CODEX_PATHで指定してください。
 								</p>
 							)}
-							{d && (
+							{d && j.config.researchFlow !== "deliverables-v1" && (
 								<>
 									<RoundProgress detail={d} />
 									{!d.research && (
@@ -493,16 +515,23 @@ function App() {
 									)}
 								</>
 							)}
+							{j.config.deliveryReplay ? (
+								<p className="notice">
+									保存済み資料による成果物生成の再テストです。新しいWeb探索ではありません。
+								</p>
+							) : null}
 							{j.reason && (
 								<div className="notice">
 									終了理由: {researchReason(j.reason)}
 								</div>
 							)}
-							{["cancelled", "failed", "partial"].includes(j.status) && (
-								<p className="notice">
-									再開すると取得済み資料と使用量を引き継ぎ、残り予算で続行します。結果が不明な通信は再送され、追加の使用量が発生する場合があります。
-								</p>
-							)}
+							{!d?.importedRun &&
+								!j.config.deliveryReplay &&
+								["cancelled", "failed", "partial"].includes(j.status) && (
+									<p className="notice">
+										再開すると取得済み資料と使用量を引き継ぎ、残り予算で続行します。結果が不明な通信は再送され、追加の使用量が発生する場合があります。
+									</p>
+								)}
 							{resume.error && (
 								<p role="alert" className="error">
 									再開できませんでした。中止の完了、残り予算・制限時間、APIの接続を確認してください。
@@ -523,14 +552,21 @@ function App() {
 									[
 										["queries", "検索Query"],
 										["urls", "取得URL"],
-										["tokens", "LLM tokens"],
+										["tokens", "LLM tokens（合計）"],
+										["inputTokens", "入力tokens（予約を含む）"],
+										["outputTokens", "出力tokens（予約を含む）"],
 									] as const
 								).map(([key, label]) => (
 									<div className="metric" key={key}>
 										<span>{label}</span>
 										<strong>
-											{Math.round(j.usage[key]).toLocaleString()}
-											<small> / {j.budget[key].toLocaleString()}</small>
+											{j.usage[key] === undefined
+												? "未記録"
+												: Math.round(j.usage[key] ?? 0).toLocaleString()}
+											<small>
+												{" "}
+												/ {j.budget[key]?.toLocaleString() ?? "個別上限なし"}
+											</small>
 										</strong>
 										<progress value={j.usage[key]} max={j.budget[key]} />
 									</div>
@@ -548,12 +584,20 @@ function App() {
 								</div>
 							</div>
 							<div className="tabs" role="tablist" aria-label="調査の表示">
-								{[
-									["artifact", "レポート"],
-									["frontier", "探索経路"],
-									["findings", "知見と根拠"],
-									["activity", "実行履歴"],
-								].map(([id, label]) => (
+								{(j.config.researchFlow === "deliverables-v1"
+									? [
+											["artifact", "レポート"],
+											["memory", "Knowledge・Episode"],
+											["activity", "実行履歴"],
+										]
+									: [
+											["artifact", "レポート"],
+											["frontier", "探索経路"],
+											["findings", "知見と根拠"],
+											["memory", "Knowledge・Episode"],
+											["activity", "実行履歴"],
+										]
+								).map(([id, label]) => (
 									<button
 										type="button"
 										role="tab"
@@ -567,6 +611,76 @@ function App() {
 								))}
 							</div>
 							<section className="panel" role="tabpanel">
+								{tab === "memory" &&
+									j.config.researchFlow === "deliverables-v1" &&
+									d && <DeliverableMemory detail={d} />}
+								{tab === "memory" &&
+									j.config.researchFlow !== "deliverables-v1" &&
+									(d?.memory?.length ? (
+										<>
+											<h3>再利用する知識と記憶</h3>
+											<p>
+												保存版：{d.memory[0].id} / 調査：
+												{d.research?.sufficient ? "充足" : "未達・確認中"} /
+												再利用試験：未実施
+											</p>
+											{d.research?.questions?.map((q) => (
+												<details key={q.id}>
+													<summary>
+														{q.text}（{q.status}）
+													</summary>
+													<p>充足条件：{q.criterion}</p>
+													<p>未確認：{q.unknowns.join(" / ") || "なし"}</p>
+												</details>
+											))}
+											<details>
+												<summary>
+													原文のある情報（{d.memory[0].evidence.length}件）
+												</summary>
+												{d.memory[0].evidence.map((e) => (
+													<p key={`${e.claimId}:${e.evidenceId}`}>
+														<a
+															href={`/api/jobs/${j.id}/memory?version=${encodeURIComponent(d.memory![0].id)}&evidence=${encodeURIComponent(e.evidenceId)}`}
+															target="_blank"
+															rel="noreferrer"
+														>
+															{e.text ?? e.quote}
+														</a>
+													</p>
+												))}
+											</details>
+											<p>
+												Knowledge {d.memory[0].knowledge.length}件 / Episode{" "}
+												{d.memory[0].episodes.length}件 / 概念{" "}
+												{d.memory[0].concepts.length}件
+											</p>
+											<p>
+												自動レビューの推定点：Knowledge{" "}
+												{d.memory[0].review?.scores.knowledge ?? "未評価"} /
+												Episode {d.memory[0].review?.scores.episode ?? "未評価"}{" "}
+												/ 詳細への到達{" "}
+												{d.memory[0].review?.scores.retrieval ?? "未評価"}
+												。別の実行による再利用試験の点数ではありません。
+											</p>
+											<a
+												href={`/api/jobs/${j.id}/memory`}
+												target="_blank"
+												rel="noreferrer"
+											>
+												Memory JSONを開く ↗
+											</a>
+											<DeliverableMemory detail={d} />
+											{d.memory[0].review?.defects.map((x) => (
+												<p key={`${x.targetId}-${x.route}-${x.reason}`}>
+													{x.reason}
+												</p>
+											))}
+										</>
+									) : (
+										<p>
+											選択した資料の読解後にKnowledge・Episodeを生成します。以前の実行にはMemoryがない場合があります。
+										</p>
+									))}
 								{tab === "artifact" &&
 									(d?.artifacts.length ? (
 										<>
@@ -690,9 +804,7 @@ function App() {
 													? "レポートは生成されていません"
 													: "根拠を集めています"}
 											</h3>
-											<p>
-												収集済みの情報は「知見と根拠」「実行履歴」で確認できます。
-											</p>
+											<p>取得・読解の状況は「実行履歴」で確認できます。</p>
 										</div>
 									))}
 								{tab === "frontier" && (
@@ -773,8 +885,7 @@ function App() {
 													{new Date(e.createdAt).toLocaleTimeString("ja-JP")}
 												</time>
 												<div>
-													<strong>{e.type}</strong>
-													<pre>{JSON.stringify(e.data)}</pre>
+													<ResearchEvent event={e} />
 												</div>
 											</div>
 										))}
@@ -810,13 +921,30 @@ function App() {
 					>
 						<div className="eyebrow">SOURCE EVIDENCE</div>
 						<h2>{source.title}</h2>
-						<a href={source.finalUrl} target="_blank" rel="noreferrer">
+						<a
+							href={pdfEvidenceUrl(source, evidence.start, evidence.end)}
+							target="_blank"
+							rel="noreferrer"
+						>
 							原典を開く ↗
 						</a>
 						<blockquote>{evidence.quote}</blockquote>
 						<dl>
 							<dt>取得日時</dt>
 							<dd>{source.fetchedAt}</dd>
+							{pdfEvidencePages(source, evidence.start, evidence.end).length >
+								0 && (
+								<>
+									<dt>PDFページ（ファイル先頭から）</dt>
+									<dd>
+										{pdfEvidencePages(
+											source,
+											evidence.start,
+											evidence.end,
+										).join(", ")}
+									</dd>
+								</>
+							)}
 							<dt>引用位置（UTF-16）</dt>
 							<dd>
 								[{evidence.start}, {evidence.end})
@@ -828,6 +956,9 @@ function App() {
 								{source.extractor} / {source.fetchMethod}
 							</dd>
 						</dl>
+						{source.pdf?.coverage && (
+							<p className="notice">{pdfReadNotice(source.pdf)}</p>
+						)}
 						{source.truncated && (
 							<p className="notice">本文は取得上限で切れています。</p>
 						)}

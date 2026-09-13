@@ -146,7 +146,11 @@ export function currentCandidates(
 	const latest = Math.max(0, ...artifacts.map((a) => a.version));
 	return candidates.filter(
 		(c) =>
-			c.artifactVersion === latest ||
+			(c.memoryId
+				? artifacts.some(
+						(a) => a.version === latest && a.memoryId === c.memoryId,
+					)
+				: c.artifactVersion === latest) ||
 			(latest <= 1 && c.artifactVersion === undefined),
 	);
 }

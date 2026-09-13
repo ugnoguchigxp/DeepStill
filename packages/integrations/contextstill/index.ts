@@ -3,6 +3,12 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { z } from "zod";
 import { normalize } from "../../core";
 export interface KnowledgeResult {
+	items?: {
+		id: string;
+		title: string;
+		body: string;
+		lastVerifiedAt?: unknown;
+	}[];
 	state: "disconnected" | "known" | "verify" | "explore" | "unavailable";
 	ids: string[];
 	reason: string;
@@ -84,6 +90,7 @@ export class ContextStillMcp implements KnowledgeProvider {
 			return {
 				state: exact ? "verify" : data.items.length ? "verify" : "explore",
 				ids: data.items.map((i) => i.id),
+				items: data.items,
 				reason: exact
 					? "同名Knowledgeあり。鮮度と根拠を外部資料で検証。"
 					: data.items.length

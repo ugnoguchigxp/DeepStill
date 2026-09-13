@@ -1,4 +1,4 @@
-import { test, expect } from "bun:test";
+import { test, expect } from "vitest";
 import { createLlmFetch, type SafeFetchResult } from "llm-fetch";
 import { Readability } from "@mozilla/readability";
 import { JSDOM } from "jsdom";

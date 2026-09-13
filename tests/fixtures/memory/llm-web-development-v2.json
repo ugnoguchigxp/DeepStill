@@ -1,0 +1,389 @@
+[
+	{
+		"id": "knowledge-01",
+		"axis": "knowledge",
+		"split": "development",
+		"question": "SAFEの72%をWeb併用回答全体の正答率として使えますか。",
+		"query": "SAFE",
+		"expected": [
+			"使えない。個別事実の評価で人間評価者と一致した割合である。",
+			"生成方式全体や全質問への正答率と一般化しない。"
+		],
+		"sourceIds": [
+			"bc4e8060-6de9-4afe-a43e-4e13a639d49d",
+			"ed2ee8a3-0e70-4b50-87d0-deec3baa8a17"
+		],
+		"critical": true
+	},
+	{
+		"id": "knowledge-02",
+		"axis": "knowledge",
+		"split": "development",
+		"question": "SAFEの76%は全ての評価対象で得られた割合ですか。",
+		"query": "SAFE",
+		"expected": [
+			"不一致例から無作為抽出された100件についての結果。",
+			"全対象での割合とはしない。"
+		],
+		"sourceIds": ["bc4e8060-6de9-4afe-a43e-4e13a639d49d"],
+		"critical": true
+	},
+	{
+		"id": "knowledge-03",
+		"axis": "knowledge",
+		"split": "development",
+		"question": "ConfRAGの57.2%からWeb全体の矛盾率を推定して構いませんか。",
+		"query": "ConfRAG",
+		"expected": [
+			"当該ベンチマークの質問における割合である。",
+			"Web全体への一般化は裏付けられていない。"
+		],
+		"sourceIds": [
+			"f2cfd94d-50f9-4eb0-984a-199687260091",
+			"0daf1bb3-073e-4fc9-bff1-281f55e6c1ab",
+			"4e6e18b6-ece7-428b-a41b-7232a928a60f"
+		],
+		"critical": true
+	},
+	{
+		"id": "knowledge-04",
+		"axis": "knowledge",
+		"split": "development",
+		"question": "ConfRAGの存在は、LLMが矛盾を正しく解消できる保証になりますか。",
+		"query": "ConfRAG",
+		"expected": [
+			"能力を評価するベンチマークと、能力を達成した保証を区別する。"
+		],
+		"sourceIds": [
+			"0daf1bb3-073e-4fc9-bff1-281f55e6c1ab",
+			"404e1411-2e0b-4435-964d-ee342d359b70"
+		],
+		"critical": true
+	},
+	{
+		"id": "knowledge-05",
+		"axis": "knowledge",
+		"split": "development",
+		"question": "検索対象の記事だけを更新すれば、基盤LLMが古くても再訓練版と同等ですか。",
+		"query": "知識",
+		"expected": [
+			"記事追加で迅速な適応は可能。",
+			"古い基盤LMは再訓練版に劣るという限定を残す。"
+		],
+		"sourceIds": ["63ac431f-0def-47e1-ac99-99861d8a424c"],
+		"critical": true
+	},
+	{
+		"id": "knowledge-06",
+		"axis": "knowledge",
+		"split": "development",
+		"question": "Webを使うLLMはすべて追加学習が不要というルールを作れますか。",
+		"query": "Web",
+		"expected": [
+			"資料のour approachについての記述と限定する。",
+			"全Web併用方式への一般化はしない。"
+		],
+		"sourceIds": ["76f437e2-c78e-408f-bd81-746b13072040"],
+		"critical": true
+	},
+	{
+		"id": "knowledge-07",
+		"axis": "knowledge",
+		"split": "development",
+		"question": "グラウンディングを、単に外部文書を入力したことと同一視してよいですか。",
+		"query": "グラウンディング",
+		"expected": ["必要な知識の活用とその範囲を超えないことを含める。"],
+		"sourceIds": ["823669e6-7b30-475d-aa67-adc339074967"],
+		"critical": true
+	},
+	{
+		"id": "knowledge-08",
+		"axis": "knowledge",
+		"split": "development",
+		"question": "SAFEの概要から、正確なAPI引数を含む実装手順を復元してください。",
+		"query": "SAFE",
+		"expected": [
+			"概要で分かる処理と、未記載のAPI引数を分ける。",
+			"API引数を捏造せず未確認とする。"
+		],
+		"sourceIds": ["ed2ee8a3-0e70-4b50-87d0-deec3baa8a17"],
+		"critical": true
+	},
+	{
+		"id": "knowledge-09",
+		"axis": "knowledge",
+		"split": "development",
+		"question": "SAFEの処理で検索結果は何の判定に使いますか。",
+		"query": "SAFE",
+		"expected": ["分解した個別事実を検索結果が支持するか判定する。"],
+		"sourceIds": ["ed2ee8a3-0e70-4b50-87d0-deec3baa8a17"],
+		"critical": true
+	},
+	{
+		"id": "knowledge-10",
+		"axis": "knowledge",
+		"split": "development",
+		"question": "検索結果が得られなかったときのSAFEの厳密な終了条件を教えてください。",
+		"query": "SAFE",
+		"expected": [
+			"引用された概要だけでは厳密な終了条件が分からないと述べる。",
+			"未記載の再試行回数や閾値を作らない。"
+		],
+		"sourceIds": ["ed2ee8a3-0e70-4b50-87d0-deec3baa8a17"],
+		"critical": true
+	},
+	{
+		"id": "episode-01",
+		"axis": "episode",
+		"split": "development",
+		"question": "初回探索で実行した検索語と目的を復元してください。",
+		"query": "探索",
+		"expected": ["初回検索語はLLMとWeb探索。", "coreの一次探索だった。"],
+		"sourceIds": ["1304"],
+		"critical": true
+	},
+	{
+		"id": "episode-02",
+		"axis": "episode",
+		"split": "development",
+		"question": "追加20万トークンは新しいWeb探索のためでしたか。",
+		"query": "探索",
+		"expected": [
+			"100万から120万への変更。",
+			"同じ根拠の編集・レビュー用で、新しい検索のためではない。"
+		],
+		"sourceIds": ["1590"],
+		"critical": true
+	},
+	{
+		"id": "episode-03",
+		"axis": "episode",
+		"split": "development",
+		"question": "取得が止まった記録から、研究対象のLLM方式が失敗したと結論できますか。",
+		"query": "探索",
+		"expected": [
+			"取得ガードの承認要求と研究対象の性能を区別する。",
+			"研究方式が失敗したとは断定できない。"
+		],
+		"sourceIds": ["1323"],
+		"critical": true
+	},
+	{
+		"id": "episode-04",
+		"axis": "episode",
+		"split": "development",
+		"question": "承認要求の取得失敗を通常のネットワーク障害として扱ってよいですか。",
+		"query": "探索",
+		"expected": [
+			"GUARD_DENIEDとrequire_approvalの記録を示す。",
+			"通常の通信失敗とは区別する。"
+		],
+		"sourceIds": ["1323"],
+		"critical": true
+	},
+	{
+		"id": "episode-05",
+		"axis": "episode",
+		"split": "development",
+		"question": "第1ラウンドで十分と判定していましたか。",
+		"query": "探索",
+		"expected": [
+			"sufficientはfalseだった。",
+			"定義・役割等の中心的な不足が残っていた。"
+		],
+		"sourceIds": ["1366"],
+		"critical": true
+	},
+	{
+		"id": "episode-06",
+		"axis": "episode",
+		"split": "development",
+		"question": "第2ラウンドから第3ラウンドへ移った理由は何ですか。",
+		"query": "探索",
+		"expected": ["同一質問の比較や信頼性・解釈などの不足が残った。"],
+		"sourceIds": ["1434", "1435"],
+		"critical": true
+	},
+	{
+		"id": "episode-07",
+		"axis": "episode",
+		"split": "development",
+		"question": "第4ラウンドで何を調べようとしましたか。",
+		"query": "探索",
+		"expected": ["複数検索結果の矛盾処理・比較・統合が目的。"],
+		"sourceIds": ["1524", "1525"],
+		"critical": true
+	},
+	{
+		"id": "episode-08",
+		"axis": "episode",
+		"split": "development",
+		"question": "第3ラウンド時点で全ての中心的な不足は解消しましたか。",
+		"query": "探索",
+		"expected": [
+			"未解消でsufficientはfalseだった。",
+			"一般的な役割や機構・比較などが不足していた。"
+		],
+		"sourceIds": ["1524"],
+		"critical": true
+	},
+	{
+		"id": "episode-09",
+		"axis": "episode",
+		"split": "development",
+		"question": "承認要求の記録は、ガードを解除して取得したことを示しますか。",
+		"query": "探索",
+		"expected": [
+			"示さない。内容が保留されたことの記録である。",
+			"解除・取得成功の行動を捏造しない。"
+		],
+		"sourceIds": ["1323"],
+		"critical": true
+	},
+	{
+		"id": "episode-10",
+		"axis": "episode",
+		"split": "development",
+		"question": "予算追加だけから、改稿が成功したと判断できますか。",
+		"query": "探索",
+		"expected": [
+			"予算変更の意図と成果を分ける。",
+			"このイベント単独では改稿の成功は分からない。"
+		],
+		"sourceIds": ["1590"],
+		"critical": true
+	},
+	{
+		"id": "retrieval-01",
+		"axis": "retrieval",
+		"split": "development",
+		"question": "SAFEの72%と76%の対象条件を、原文根拠へ戻って示してください。",
+		"query": "SAFE",
+		"expected": [
+			"約16k事実と、不一致から抽出した100件を区別する。",
+			"該当引用への参照を示す。"
+		],
+		"sourceIds": ["bc4e8060-6de9-4afe-a43e-4e13a639d49d"],
+		"critical": true
+	},
+	{
+		"id": "retrieval-02",
+		"axis": "retrieval",
+		"split": "development",
+		"question": "SAFEは生成後の何を評価する仕組みですか。原文を示してください。",
+		"query": "SAFE",
+		"expected": [
+			"長文回答を個別事実へ分解して評価する。",
+			"対応する原文根拠を引用する。"
+		],
+		"sourceIds": ["ed2ee8a3-0e70-4b50-87d0-deec3baa8a17"],
+		"critical": true
+	},
+	{
+		"id": "retrieval-03",
+		"axis": "retrieval",
+		"split": "development",
+		"question": "ConfRAGの規模と検索段落数を根拠付きで回復してください。",
+		"query": "ConfRAG",
+		"expected": ["1814質問、平均9.58段落。", "対応する根拠を示す。"],
+		"sourceIds": ["4e6e18b6-ece7-428b-a41b-7232a928a60f"],
+		"critical": true
+	},
+	{
+		"id": "retrieval-04",
+		"axis": "retrieval",
+		"split": "development",
+		"question": "ConfRAGの三つの評価タスクを根拠付きで取り出してください。",
+		"query": "ConfRAG",
+		"expected": [
+			"回答クラスタリング、回答カバレッジ、理由カバレッジ。",
+			"原文参照を示す。"
+		],
+		"sourceIds": ["404e1411-2e0b-4435-964d-ee342d359b70"],
+		"critical": true
+	},
+	{
+		"id": "retrieval-05",
+		"axis": "retrieval",
+		"split": "development",
+		"question": "新記事追加と古い基盤モデルの関係を、限定を落とさず回復してください。",
+		"query": "知識",
+		"expected": [
+			"迅速な適応が可能。",
+			"古い基盤LMは再訓練版に劣るという原文の限定を保持。"
+		],
+		"sourceIds": ["63ac431f-0def-47e1-ac99-99861d8a424c"],
+		"critical": true
+	},
+	{
+		"id": "retrieval-06",
+		"axis": "retrieval",
+		"split": "development",
+		"question": "追加学習不要の記述を、主語の限定を保って取り出してください。",
+		"query": "Web",
+		"expected": [
+			"our approachという特定方式の主語を保持する。",
+			"全方式の性質として扱わない。"
+		],
+		"sourceIds": ["76f437e2-c78e-408f-bd81-746b13072040"],
+		"critical": true
+	},
+	{
+		"id": "retrieval-07",
+		"axis": "retrieval",
+		"split": "development",
+		"question": "グラウンディングの定義の二つの条件を原文へ戻って示してください。",
+		"query": "グラウンディング",
+		"expected": [
+			"必要な知識を活用すること。",
+			"外部知識の範囲を超えないこと。"
+		],
+		"sourceIds": ["823669e6-7b30-475d-aa67-adc339074967"],
+		"critical": true
+	},
+	{
+		"id": "retrieval-08",
+		"axis": "retrieval",
+		"split": "development",
+		"question": "ConfRAGの57.2%は何を数えていますか。",
+		"query": "ConfRAG",
+		"expected": [
+			"ベンチマークの質問における明示的矛盾。",
+			"Webページ全体や回答の誤り率ではない。"
+		],
+		"sourceIds": [
+			"f2cfd94d-50f9-4eb0-984a-199687260091",
+			"0daf1bb3-073e-4fc9-bff1-281f55e6c1ab"
+		],
+		"critical": true
+	},
+	{
+		"id": "retrieval-09",
+		"axis": "retrieval",
+		"split": "development",
+		"question": "検索されたWeb情報とLLMの回答はどのように接続されていますか。",
+		"query": "Web",
+		"expected": [
+			"Web情報を外部証拠として取得し、それに条件づける。",
+			"該当の根拠に結び付ける。"
+		],
+		"sourceIds": ["3231f75c-4d54-4112-aeeb-3f7e9bc05e3a"],
+		"critical": true
+	},
+	{
+		"id": "retrieval-10",
+		"axis": "retrieval",
+		"split": "development",
+		"question": "SAFEとConfRAGは同じ評価対象ですか。",
+		"query": "評価",
+		"expected": [
+			"SAFEは長文の個別事実、ConfRAGは矛盾文書についての推論能力を評価。",
+			"異なる概念として根拠を分ける。"
+		],
+		"sourceIds": [
+			"ed2ee8a3-0e70-4b50-87d0-deec3baa8a17",
+			"0daf1bb3-073e-4fc9-bff1-281f55e6c1ab"
+		],
+		"critical": true
+	}
+]

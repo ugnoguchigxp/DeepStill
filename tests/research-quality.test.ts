@@ -1,6 +1,6 @@
 import { reviewSchema, reviewPass } from "../packages/artifact/quality";
 import { transcodeLegacyHtml } from "../packages/crawler/encoding";
-import { test, expect } from "bun:test";
+import { test, expect } from "vitest";
 import { selectSections, locateEvidence } from "../packages/core";
 import {
 	strictSchema,

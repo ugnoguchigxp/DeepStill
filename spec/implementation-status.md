@@ -1,5 +1,7 @@
 # DeepStill v0.1 実装記録
 
+2026-09-12追記: [Memory先行生成v1](memory-first-implementation.md)を実装。Knowledge・Episode・概念をレポートより先に生成する。再利用品質90点超は未達で、実装範囲と残る検証は同文書に記載した。
+
 2026-09-12追記: 新規調査の逐次キューとラウンド評価を実装した。[ラウンド探索v2の実装記録](round-research-implementation.md)を参照。以下のv0.1記録は当時の実装を保持する。
 
 更新日: 2026-09-12。ローカル単体PoCの実装と検証を実施。実サービスのcredentialを必要とするlive検証と、実調査100件の品質評価は未実施。
@@ -87,3 +89,13 @@ Codex token予約は内部コンテキストと検索の実行回数を含む厳
 SDKはユーザーのMCP設定を継承し得る。実測で1回、抽出中にContextStillのread-only toolが呼ばれたため、設定された各MCP serverを明示的に無効化し、外部tool・shell・file変更を含む応答を拒否するよう変更した。モデル・reasoning・usage・tool itemはauditに保存する。
 
 llm-fetchが未対応だったISO-8859-1 / Windows-1252のHTMLは、安全なHTTP取得後に宣言された文字コードをUTF-8へ変換してから、同じguardと抽出器へ渡す。元レスポンスのhashと文字コードを残す。guardの判定は緩和していない。
+
+## Memory中心の逐次探索の改善
+
+2026-09-13に新規ジョブ用の `researchControlVersion: 2` を追加した。問い・行動候補・採否・段階読解・依存差分・原文検索・最終レビューからの復帰は [改善実装と検証](memory-first-improvement-implementation.md) を参照。品質90点超、未使用holdout、LocalLLM、外部登録互換の合格を意味しない。
+
+同日の追補として、追加読解・未取得候補の取得・評価予算予約・Episodeの検索を修正し、独立した実探索充足監査を追加した。[残課題の実装と充足検証](memory-first-fulfillment.md)に全試行を記録する。LocalLLM実測はユーザー指定により今回の対象外。実探索は取得保留と根拠不足により未充足であり、回帰試験成功を品質合格へ読み替えない。
+
+## PDFの読み取り改善（2026-09-13）
+
+埋め込み文字のPDF対応を拡張し、ページ別の本文位置・未読状態・抽出上限、水平な二段組みの読み順、ページ付き引用を追加した。OCR・画像の意味解析は引き続き対象外。以前のPDF対象外という記述からの更新と制約は[PDF実装記録](pdf-reading.md)を参照。

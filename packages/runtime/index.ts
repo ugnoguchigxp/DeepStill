@@ -6,8 +6,9 @@ import {
 	existsSync,
 	statSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
-const root = resolve(import.meta.dir, "../..");
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 export function codeVersion() {
 	const hash = new Bun.CryptoHasher("sha256");
 	const walk = (dir: string) => {

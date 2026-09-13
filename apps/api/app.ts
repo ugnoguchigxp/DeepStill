@@ -1,3 +1,13 @@
+import { configuredCodexModel } from "../../packages/llm-provider/codex";
+import { skillMarkdown } from "../../packages/research/deliverables";
+import { sourceIndex, readSourceRange } from "../../packages/memory/source";
+import {
+	contextStillExport,
+	drillMemory,
+	memoryObject,
+	searchMemory,
+	memoryObjectStatus,
+} from "../../packages/memory";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { serveStatic } from "hono/bun";
@@ -53,7 +63,8 @@ export function createApp(store: Store) {
 				: null;
 		const worker = workerHealth(store.path);
 		const configured = !!(
-			(process.env.SEARCH_PROVIDER === "codex" ||
+			(process.env.DELIVERABLE_FLOW_ENABLED !== "0" ||
+				process.env.SEARCH_PROVIDER === "codex" ||
 				(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD)) &&
 			(process.env.LLM_PROVIDER === "codex" || process.env.LLM_MODEL)
 		);
@@ -72,10 +83,14 @@ export function createApp(store: Store) {
 			llmProvider: process.env.LLM_PROVIDER || "compatible",
 			model:
 				process.env.LLM_PROVIDER === "codex"
-					? "gpt-5.6-luna"
+					? configuredCodexModel()
 					: process.env.LLM_MODEL,
 			reasoning: process.env.LLM_PROVIDER === "codex" ? "low" : null,
-			searchProvider: process.env.SEARCH_PROVIDER || "dataforseo",
+			searchProvider:
+				process.env.DELIVERABLE_FLOW_ENABLED !== "0" &&
+				process.env.SEARCH_PROVIDER !== "dataforseo"
+					? "direct"
+					: process.env.SEARCH_PROVIDER || "dataforseo",
 		}),
 	);
 	app.post("/api/execution/confirm-stopped", async (c) => {
@@ -132,6 +147,101 @@ export function createApp(store: Store) {
 		return d ? c.json(d) : c.json({ error: "NOT_FOUND" }, 404);
 	});
 
+	app.get("/api/memory/search", (c) => {
+		const query = c.req.query("q") ?? "";
+		const items = store.listJobs().flatMap((job) => {
+			const d = store.detail(job.id);
+			const b =
+				d?.memory?.find((m) => m.status === "reviewed") ?? d?.memory?.[0];
+			return b
+				? searchMemory(b, query, 10, c.req.query("state") ?? "accepted").map(
+						(x) => ({ ...x, jobId: job.id }),
+					)
+				: [];
+		});
+		return c.json({ items: items.slice(0, 50) });
+	});
+	app.get("/api/jobs/:id/skills/:knowledgeId", (c) => {
+		const d = store.detail(c.req.param("id"));
+		const k = d?.memory?.[0]?.knowledge.find(
+			(k) => k.id === c.req.param("knowledgeId"),
+		);
+		if (!k?.skill || k.type !== "procedure")
+			return c.json({ error: "SKILL_NOT_FOUND" }, 404);
+		const text = skillMarkdown({ ...k, skill: k.skill, citations: [] });
+		return c.body(text, 200, {
+			"Content-Type": "text/markdown; charset=utf-8",
+			"Content-Disposition": "attachment; filename=SKILL.md",
+		});
+	});
+	app.get("/api/jobs/:id/memory", (c) => {
+		const d = store.detail(c.req.param("id"));
+		if (!d) return c.json({ error: "NOT_FOUND" }, 404);
+		const version = c.req.query("version");
+		const bundle = version
+			? d.memory?.find((m) => m.id === version)
+			: d.memory?.[0];
+		if (!bundle) return c.json({ error: "MEMORY_NOT_AVAILABLE" }, 404);
+		const snapshot = c.req.query("snapshot");
+		if (snapshot) {
+			const source = d.sources.find((s) => s.id === snapshot);
+			if (!source || !bundle.evidence.some((e) => e.snapshotId === snapshot))
+				return c.json({ error: "SNAPSHOT_NOT_IN_MEMORY" }, 404);
+			if (c.req.query("start") === undefined)
+				return c.json(sourceIndex(source));
+			try {
+				return c.json(
+					readSourceRange(source, c.req.query("hash") ?? "", {
+						start: Number(c.req.query("start")),
+						end: Number(c.req.query("end")),
+					}),
+				);
+			} catch (error) {
+				return c.json({ error: String(error) }, 400);
+			}
+		}
+		const event = c.req.query("event");
+		if (event)
+			return c.json({
+				memoryId: bundle.id,
+				event: bundle.events.find((e) => e.id === Number(event)) ?? null,
+			});
+		const query = c.req.query("q"),
+			object = c.req.query("object"),
+			evidence = c.req.query("evidence");
+		if (query)
+			return c.json({
+				memoryId: bundle.id,
+				items: searchMemory(bundle, query, 10, c.req.query("state") ?? "all"),
+			});
+		if (object)
+			return c.json({
+				memoryId: bundle.id,
+				item: memoryObject(bundle, object),
+				status: memoryObjectStatus(bundle, object),
+				metadata: bundle.objectMetadata?.[object] ?? null,
+				relations: bundle.relations.filter(
+					(r) => r.from === object || r.to === object,
+				),
+			});
+		if (evidence) {
+			try {
+				return c.json({
+					memoryId: bundle.id,
+					evidence: drillMemory(bundle, d, evidence),
+				});
+			} catch {
+				return c.json({ error: "MEMORY_LOCATOR_STALE" }, 409);
+			}
+		}
+		if (c.req.query("export") === "contextstill")
+			return c.json(contextStillExport(bundle, d));
+		return c.json({
+			bundle,
+			qualityKind: "llm_review_estimate",
+			reuseTested: false,
+		});
+	});
 	app.get("/api/jobs/:id/research", (c) =>
 		store.getJob(c.req.param("id"))
 			? c.json(store.research(c.req.param("id")))
