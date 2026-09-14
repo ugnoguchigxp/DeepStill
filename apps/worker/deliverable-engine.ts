@@ -48,10 +48,7 @@ interface Flow {
 	queue: Target[];
 	attempted: string[];
 	searched: string[];
-	// Delivered ranges remain the citation boundary; committed ranges track accepted writes.
 	cursors: Record<string, number>;
-	committedCursors?: Record<string, number>;
-	pendingRead?: { sourceId: string; start: number; end: number; text: string };
 	depths: Record<string, number>;
 	content?: { sourceId: string; start: number; end: number; text: string };
 	searchId?: string;
@@ -97,9 +94,6 @@ export class DeliverableEngine {
 	async step(t: Task, signal: AbortSignal) {
 		let job = must(this.store.getJob(t.job_id));
 		let state = JSON.parse(t.payload) as Flow;
-		// Old tasks retain legacy cursor semantics; only rename their pending payload.
-		state.pendingRead ??= state.content;
-		delete state.content;
 		const save = (fn = () => {}, done = false, delay = 0) =>
 			this.store.commit(t, fn, state, done, delay);
 		const event = (action: string, purpose: string, result: string) => {
@@ -131,7 +125,6 @@ export class DeliverableEngine {
 				attempted: [],
 				searched: [],
 				cursors: {},
-				committedCursors: {},
 				depths: {},
 				poll: 0,
 				failures: 0,
@@ -182,7 +175,7 @@ export class DeliverableEngine {
 			state.phase = "episode";
 		};
 		const reconsider = () => {
-			state.pendingRead = undefined;
+			state.content = undefined;
 			state.phase = "write";
 		};
 		try {
@@ -214,8 +207,7 @@ export class DeliverableEngine {
 						action.sourceId,
 					);
 					if (!source) throw Error("UNKNOWN_READ_SOURCE");
-					const start =
-						(state.committedCursors ?? state.cursors)[source.id] ?? 0;
+					const start = state.cursors[source.id] ?? 0;
 					if (start >= source.text.length) {
 						state.repair =
 							"この資料は全文既読です。他のリンクか新規検索で不足を補ってください。";
@@ -235,7 +227,7 @@ export class DeliverableEngine {
 						bytes += n;
 						endOffset = line.end;
 					}
-					state.pendingRead = {
+					state.content = {
 						sourceId: source.id,
 						start,
 						end: endOffset,
@@ -505,7 +497,7 @@ export class DeliverableEngine {
 				}
 			}
 			if (state.phase === "write") {
-				const content = state.pendingRead;
+				const content = state.content;
 				const sources = this.store.all<Snapshot>(job.id, "source");
 				const recoveryExhausted = state.failures >= 8;
 				// A retrieval stop adds no evidence. Preserve the last validated draft;
@@ -563,9 +555,6 @@ export class DeliverableEngine {
 						title: s.title,
 						url: s.finalUrl,
 						readUntil: state.cursors[s.id] ?? 0,
-						committedUntil: state.committedCursors
-							? (state.committedCursors[s.id] ?? 0)
-							: undefined,
 						length: s.text.length,
 						readingNotice: pdfReadNotice(s.pdf),
 						readable: (state.cursors[s.id] ?? 0) < s.text.length,
@@ -660,7 +649,6 @@ export class DeliverableEngine {
 					() => this.providers.llm.complete("deliverable_step", input, signal),
 				);
 				state.sequence++;
-				let committing = false;
 				try {
 					const parsed = deliverableStepSchema.parse(JSON.parse(r.text));
 					if (content && parsed.draft === null)
@@ -741,39 +729,6 @@ export class DeliverableEngine {
 						(!output.draft.sections.length || output.draft.openQuestions.length)
 					)
 						throw Error("UNRESOLVED_REQUEST");
-					const unchanged =
-						JSON.stringify(state.draft) === JSON.stringify(output.draft);
-					const acceptDraft = () => {
-						state.draft = output.draft;
-						if (!unchanged) state.version++;
-						if (content && state.committedCursors)
-							state.committedCursors[content.sourceId] = content.end;
-						state.pendingRead = undefined;
-					};
-					const persistAccepted = () => {
-						if (content && state.committedCursors)
-							this.store.event(job.id, "read.committed", {
-								sourceId: content.sourceId,
-								start: content.start,
-								end: content.end,
-								version: state.version,
-								unchanged,
-							});
-						if (unchanged) return;
-						for (const c of result.claims)
-							this.store.put(job.id, "claim", c.id, c);
-						for (const e of result.evidence)
-							this.store.put(job.id, "evidence", e.id, e);
-						this.persistDraft(job, state, result.artifact, result.knowledge);
-						this.store.event(job.id, "deliverable.updated", {
-							version: state.version,
-							paragraphs: output.draft.sections.reduce(
-								(n, section) => n + section.paragraphs.length,
-								0,
-							),
-							knowledge: output.draft.knowledge.length,
-						});
-					};
 					if (
 						nextAction.kind === "finish" &&
 						!nextAction.satisfied &&
@@ -789,28 +744,30 @@ export class DeliverableEngine {
 					) {
 						state.finishReconsidered = 1;
 						state.repairKind = "navigation";
-						acceptDraft();
+						state.draft = output.draft;
+						state.content = undefined;
 						state.repair =
 							"未解決の問いと予算が残っています。検索0件なら未確定の略語を引用符で固定せず、展開語や別の切り口で検索してください。拒否URLの再取得は禁止です。追加経路が不適切なら、その具体的理由で未充足終了してください。";
-						committing = true;
-						save(() => {
-							persistAccepted();
+						save(() =>
 							event(
 								"reconsider",
 								"未解決の問いに対して別の切り口を確認",
 								nextAction.reason,
-							);
-						});
+							),
+						);
 						return;
 					}
+					const unchanged =
+						JSON.stringify(state.draft) === JSON.stringify(output.draft);
 					state.noGain = content && unchanged ? state.noGain + 1 : 0;
-					acceptDraft();
+					state.draft = output.draft;
+					if (!unchanged) state.version++;
 					state.next = output.next;
+					state.content = undefined;
 					state.repair = undefined;
 					state.repairKind = undefined;
 					state.phase = "act";
 					if (recoveryExhausted) end("retrieval_recovery_limit");
-					committing = true;
 					save(() => {
 						const parent =
 							nextAction.kind === "fetch"
@@ -840,11 +797,23 @@ export class DeliverableEngine {
 									? "search_results"
 									: "retrieval_failed",
 						});
-						persistAccepted();
+						if (unchanged) return;
+						for (const c of result.claims)
+							this.store.put(job.id, "claim", c.id, c);
+						for (const e of result.evidence)
+							this.store.put(job.id, "evidence", e.id, e);
+						this.persistDraft(job, state, result.artifact, result.knowledge);
+						this.store.event(job.id, "deliverable.updated", {
+							version: state.version,
+							paragraphs: output.draft.sections.reduce(
+								(n, s) => n + s.paragraphs.length,
+								0,
+							),
+							knowledge: output.draft.knowledge.length,
+						});
 					});
 					return;
 				} catch (error) {
-					if (committing) throw error;
 					if (state.repair) {
 						end("invalid_deliverable");
 						save();
