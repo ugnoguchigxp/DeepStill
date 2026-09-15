@@ -1,4 +1,5 @@
 import { expect, test, vi } from "vitest";
+import { z } from "zod";
 
 let receivedThread: Record<string, unknown> = {};
 let receivedConfig: Record<string, unknown> = {};
@@ -229,4 +230,50 @@ test("navigation schema only permits unread source IDs and removes read when exh
 	const text = JSON.stringify(withUnread);
 	expect(text).toContain('"enum":["unread"]');
 	expect(JSON.stringify(without)).not.toContain('"const":"read"');
+});
+
+test("draft citations reject truncated and unread IDs while retaining completed sources", () => {
+	const oldId = "7a650858-6e0b-4bad-a06b-a599bf9c4ab2";
+	const schema = groundedSchema(
+		"deliverable_step",
+		JSON.stringify({
+			newContent: { sourceId: "new", lines: [] },
+			readableSourceIds: ["new"],
+			sources: [
+				{ id: oldId, readUntil: 100, length: 100 },
+				{ id: "new", readUntil: 50, length: 100 },
+				{ id: "unread", readUntil: 0, length: 100 },
+			],
+		}),
+	);
+	const validate = z.fromJSONSchema(schema);
+	const output = {
+		draft: {
+			sections: [
+				{
+					title: "Prior evidence",
+					paragraphs: [
+						{
+							text: "Retained explanation",
+							kind: "finding",
+							citations: [{ sourceId: oldId, firstLine: 1, lastLine: 1 }],
+						},
+					],
+				},
+			],
+			knowledge: [],
+			limitations: [],
+			openQuestions: [],
+		},
+		next: { kind: "read", sourceId: "new", purpose: "Continue reading" },
+	};
+	expect(validate.safeParse(output).success).toBe(true);
+	for (const id of ["7a650858-6e0b-4bad-a599bf9c4ab2", "unread"]) {
+		const invalid = structuredClone(output);
+		invalid.draft.sections[0].paragraphs[0].citations[0].sourceId = id;
+		expect(validate.safeParse(invalid).success).toBe(false);
+	}
+	const reread = structuredClone(output);
+	reread.next.sourceId = oldId;
+	expect(validate.safeParse(reread).success).toBe(false);
 });

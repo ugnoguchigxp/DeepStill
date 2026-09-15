@@ -59,6 +59,20 @@ export function groundedSchema(kind: PromptKind, input: string) {
 					? deliverableStepSchema.extend({ draft: draftSchema })
 					: deliverableStepSchema,
 		);
+		const citedSourceIds = (data.sources ?? [])
+			.filter((source: { readUntil: number }) => source.readUntil > 0)
+			.map((source: { id: string }) => source.id);
+		const bindCitationIds = (value: unknown): void => {
+			if (!value || typeof value !== "object") return;
+			const node = value as Record<string, unknown>;
+			const properties = node.properties as
+				| Record<string, Record<string, unknown>>
+				| undefined;
+			if (properties?.sourceId)
+				properties.sourceId = { type: "string", enum: citedSourceIds };
+			for (const child of Object.values(node)) bindCitationIds(child);
+		};
+		if (citedSourceIds.length) bindCitationIds(schema.properties?.draft);
 		const nextSchema = schema.properties?.next;
 		if (
 			typeof nextSchema === "object" &&
