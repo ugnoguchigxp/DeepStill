@@ -1147,6 +1147,8 @@ test("invalid navigation stays compact and can move from a completed source to n
 							};
 						} else if (d.validationError) {
 							expect(d.validationError).toContain("SOURCE_ALREADY_READ");
+							expect(d.validationError).toContain(d.sources[0].id);
+							expect(d.validationError).toContain('"kind":"read"');
 							expect(d.navigationOnly).toBe(true);
 							expect(d.draft).toBeUndefined();
 							expect(d.readableSourceIds).toEqual([]);

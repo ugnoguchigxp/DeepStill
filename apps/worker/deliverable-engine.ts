@@ -649,6 +649,7 @@ export class DeliverableEngine {
 					() => this.providers.llm.complete("deliverable_step", input, signal),
 				);
 				state.sequence++;
+				let proposedAction: ResearchAction | undefined;
 				try {
 					const parsed = deliverableStepSchema.parse(JSON.parse(r.text));
 					if (content && parsed.draft === null)
@@ -667,6 +668,7 @@ export class DeliverableEngine {
 					for (const e of result.evidence)
 						if (e.end > (state.cursors[e.snapshotId] ?? 0))
 							throw Error("CITATION_NOT_READ");
+					proposedAction = output.next;
 					if (output.next.kind === "fetch") {
 						const url = canonicalUrl(output.next.url);
 						const candidate = {
@@ -820,6 +822,8 @@ export class DeliverableEngine {
 						return;
 					}
 					state.repair = String(error).slice(0, 1000);
+					if (proposedAction)
+						state.repair += `\nPrevious proposed action (not executed): ${JSON.stringify(proposedAction)}. Choose a valid action from the current candidates, readable sources and remaining budget; do not repeat the rejected action.`;
 					state.repairKind = navigationOnly ? "navigation" : "deliverable";
 					save(() => {
 						this.store.event(job.id, "deliverable.invalid", {
