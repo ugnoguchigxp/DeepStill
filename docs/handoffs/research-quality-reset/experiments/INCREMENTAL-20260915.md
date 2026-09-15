@@ -213,3 +213,9 @@ S3の失敗したdelivery11/12をそのまま検証すると、現行schemaは�
 配点: 対象12（モデル・API・キャッシュ概要、自己ホストと詳細機構未確認）、探索13（公式と独立解説を読み進めるが、取得済み資料へ戻って停止、費用対増分1/5）、根拠13（ベンチ表のV4 Flash→V4.1 FlashをV4.1→V4.1と誤記。二次資料の帰属と未読は区別）、説明10（層数・方式名と数値の列挙が多く、CSA2/FP4の具体的な変換例を説明できない。前版のAPI時刻・価格説明が脱落）、Knowledge7（4件は条件付き注意則中心）、Episode5（停止と未読を記録するが、保存成果物まで無効と述べ、訂正で別の取得済みURLへ移った経路は不明瞭）。
 
 以前のDeepSeek基準59を置き換えて60を今回の近接対の比較基準とする。S4Cは内容面の採点を変えず、未到達なら引用ID回復効果を未検証として扱う。完了10live＋診断4件累積入力1,483,937/出力183,448。
+
+## S4C実装・保存・live開始
+
+候補39aceaa45cd2、保存codex/experiment-incremental-s4c-20260915へpush。変更はcodex.tsの14行と回帰テスト47行（zod import含む）。既読資料がある場合のdraft引用sourceIdだけにenumを設定し、readの未読ID限定は既存のまま。S1〜S3の変更は含まない。verifyは37ファイル243テスト、typecheck/lint/format/build/docs通過（既存lint警告58）。
+
+DeepSeek候補f5e7a556-189e-4c6d-abec-be50ec2077c5を実行中。新基準80a8e56bと比較する。SDK監査には出力schema自体が含まれないため、保存入力と当該providerコードから再構築したschemaをreconstructed-schemas.jsonとして区別して保存した。実際にSDKが出した監査フィールドと混同しない。schema-auditの初期値は基準856〜4425 bytes、候補856〜4717 bytes（候補途中、最終時に更新）。
