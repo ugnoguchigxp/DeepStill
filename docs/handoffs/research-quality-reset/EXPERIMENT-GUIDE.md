@@ -2,6 +2,8 @@
 
 更新日：2026-09-14。リポジトリ：`/Users/y.noguchi/Code/deepStill`。
 
+実施済み候補の採否と再発防止事項は [TRIAL-HISTORY.md](TRIAL-HISTORY.md) を参照する。候補を実装する前に、同種の変更が既に不採用または採用保留になっていないか確認する。
+
 ## 目的と仕組み
 
 DeepStillは、テーマからWeb検索・資料取得・読解を繰り返し、レポート、再利用可能なKnowledge、調査全体のEpisodeを生成するアプリケーションである。通常の探索は `deliverables-v1` 経路で動く。
