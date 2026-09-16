@@ -677,6 +677,15 @@ test("direct search performs no LLM preprocessing and surfaces provider failure"
 	await expect(failed.poll("x", new AbortController().signal)).rejects.toThrow(
 		"offline",
 	);
+	const timedOut = new DirectSearch({
+		name: "test",
+		async search() {
+			throw Error("DuckDuckGo search timed out.");
+		},
+	});
+	await expect(
+		timedOut.poll("x", new AbortController().signal),
+	).rejects.toMatchObject({ retryable: true });
 });
 
 test("provider schema uses supported anyOf rather than oneOf for actions", async () => {
@@ -1087,6 +1096,105 @@ test("search refusal preserves known candidates without retrying the search serv
 		expect(s.store.detail(s.job.id)!.artifacts.at(-1)?.sections).toHaveLength(
 			1,
 		);
+	} finally {
+		s.close();
+	}
+});
+
+test("one transient search timeout allows a distinct fallback query", async () => {
+	const s = setup();
+	let polls = 0;
+	let sawRetryableState = false;
+	try {
+		const e = new Engine(
+			s.store,
+			() => ({
+				...mocks,
+				search: {
+					...mocks.search,
+					async poll(...args) {
+						polls++;
+						if (polls === 1)
+							throw new SearchProviderError(
+								"DuckDuckGo search timed out.",
+								true,
+							);
+						return mocks.search.poll(...args);
+					},
+				},
+				llm: {
+					async complete(kind, input) {
+						if (kind === "deliverable_episode")
+							return { text: JSON.stringify(episode), usage: 100, audit: {} };
+						const d = JSON.parse(input);
+						if (!d.newContent && d.discoveries.length === 0) {
+							sawRetryableState =
+								d.searchUnavailable === null && d.remainingQueries > 0;
+							return {
+								text: JSON.stringify({
+									draft: null,
+									next: {
+										kind: "search",
+										query: "expanded fallback query",
+										purpose: "一時失敗後に別表現で確認",
+									},
+								}),
+								usage: 100,
+								audit: {},
+							};
+						}
+						if (!d.newContent)
+							return {
+								text: JSON.stringify({
+									draft: null,
+									next: {
+										kind: "fetch",
+										url: d.discoveries[0].url,
+										purpose: "代替検索で見つけた本文を確認",
+									},
+								}),
+								usage: 100,
+								audit: {},
+							};
+						const line = d.newContent.lines[0];
+						return {
+							text: JSON.stringify({
+								draft: {
+									...empty,
+									sections: [
+										{
+											title: "確認結果",
+											paragraphs: [
+												{
+													text: line.text,
+													kind: "finding",
+													citations: [
+														{
+															sourceId: d.newContent.sourceId,
+															firstLine: line.number,
+															lastLine: line.number,
+														},
+													],
+												},
+											],
+										},
+									],
+								},
+								next: { kind: "finish", satisfied: true, reason: "確認済み" },
+							}),
+							usage: 100,
+							audit: {},
+						};
+					},
+				},
+			}),
+			join(s.dir, "artifacts"),
+		);
+		await run(e, s.job.id);
+		expect(sawRetryableState).toBe(true);
+		expect(polls).toBe(2);
+		expect(s.store.detail(s.job.id)!.queries).toHaveLength(2);
+		expect(s.store.detail(s.job.id)!.job.status).toBe("completed");
 	} finally {
 		s.close();
 	}

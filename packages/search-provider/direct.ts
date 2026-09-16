@@ -21,9 +21,12 @@ export class DirectSearch implements SearchProvider {
 			});
 			return { ready: true, hits, cost: 0, usage: 0 };
 		} catch (error) {
+			const message = error instanceof Error ? error.message : "SEARCH_FAILED";
 			throw new SearchProviderError(
-				error instanceof Error ? error.message : "SEARCH_FAILED",
-				false,
+				message,
+				/timed? out|timeout|temporar|econnreset|network|fetch failed/i.test(
+					message,
+				),
 			);
 		}
 	}
