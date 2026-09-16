@@ -82,77 +82,6 @@ const blank = (): Draft => ({
 	limitations: [],
 	openQuestions: [],
 });
-
-function validateNextAction(
-	action: ResearchAction,
-	draft: Draft,
-	state: Flow,
-	sources: Snapshot[],
-	job: Job,
-) {
-	if (action.kind === "fetch") {
-		const url = canonicalUrl(action.url);
-		const candidate = {
-			url,
-			title: state.queue.find((item) => item.url === url)?.title,
-		};
-		if (
-			(state.failuresDetail ?? []).some(
-				(failure) =>
-					["deny", "require_approval"].includes(failure.decision) &&
-					sameSource(candidate, failure),
-			)
-		)
-			throw Error("WITHHELD_SOURCE_ALIAS_USE_INDEPENDENT_EVIDENCE");
-		if (
-			!state.queue.some((item) => item.url === url) &&
-			!sources.some((source) =>
-				(source.links ?? []).some((link) => link.url === url),
-			)
-		)
-			throw Error("UNDISCOVERED_URL");
-		if (state.attempted.includes(url)) throw Error("URL_ALREADY_ATTEMPTED");
-		const depth =
-			state.queue.find((item) => item.url === url)?.depth ??
-			sources.reduce(
-				(value, source) =>
-					(source.links ?? []).some((link) => link.url === url)
-						? Math.min(
-								value,
-								(state.depths[canonicalUrl(source.finalUrl)] ?? 0) + 1,
-							)
-						: value,
-				Infinity,
-			);
-		if (depth > job.budget.depth) throw Error("DEPTH_LIMIT");
-		action.url = url;
-	}
-	if (action.kind === "search" && state.searchUnavailable)
-		throw Error("SEARCH_UNAVAILABLE_USE_KNOWN_SOURCES_OR_FINISH");
-	if (
-		action.kind === "read" &&
-		!sources.some((source) => source.id === action.sourceId)
-	)
-		throw Error("UNKNOWN_READ_SOURCE");
-	if (
-		action.kind === "read" &&
-		(state.cursors[action.sourceId] ?? 0) >=
-			must(sources.find((source) => source.id === action.sourceId)).text.length
-	)
-		throw Error("SOURCE_ALREADY_READ");
-	if (
-		action.kind === "search" &&
-		state.searched.includes(action.query.trim().toLowerCase())
-	)
-		throw Error("QUERY_ALREADY_SEARCHED");
-	if (
-		action.kind === "finish" &&
-		action.satisfied &&
-		(!draft.sections.length || draft.openQuestions.length)
-	)
-		throw Error("UNRESOLVED_REQUEST");
-}
-
 export class DeliverableEngine {
 	constructor(
 		private host: Engine,
@@ -738,50 +667,68 @@ export class DeliverableEngine {
 					for (const e of result.evidence)
 						if (e.end > (state.cursors[e.snapshotId] ?? 0))
 							throw Error("CITATION_NOT_READ");
-					const nextAction = output.next;
-					const unchanged =
-						JSON.stringify(state.draft) === JSON.stringify(output.draft);
-					state.noGain = content && unchanged ? state.noGain + 1 : 0;
-					state.draft = output.draft;
-					if (!unchanged) state.version++;
-					const persistAcceptedDraft = () => {
-						if (unchanged) return;
-						for (const c of result.claims)
-							this.store.put(job.id, "claim", c.id, c);
-						for (const e of result.evidence)
-							this.store.put(job.id, "evidence", e.id, e);
-						this.persistDraft(job, state, result.artifact, result.knowledge);
-						this.store.event(job.id, "deliverable.updated", {
-							version: state.version,
-							paragraphs: output.draft.sections.reduce(
-								(n, s) => n + s.paragraphs.length,
-								0,
-							),
-							knowledge: output.draft.knowledge.length,
-						});
-					};
-					try {
-						validateNextAction(nextAction, output.draft, state, sources, job);
-					} catch (actionError) {
-						if (state.repair && state.repairKind === "navigation") {
-							end("invalid_deliverable");
-							save();
-							return;
-						}
-						state.content = undefined;
-						state.repair = String(actionError).slice(0, 1000);
-						state.repairKind = "navigation";
-						state.phase = "write";
-						save(() => {
-							persistAcceptedDraft();
-							this.store.event(job.id, "deliverable.invalid", {
-								reason: state.repair,
-								draftSaved: !unchanged,
-							});
-							event("invalid_action", "判断の訂正", state.repair ?? "invalid");
-						});
-						return;
+					if (output.next.kind === "fetch") {
+						const url = canonicalUrl(output.next.url);
+						const candidate = {
+							url,
+							title: state.queue.find((q) => q.url === url)?.title,
+						};
+						if (
+							(state.failuresDetail ?? []).some(
+								(failure) =>
+									["deny", "require_approval"].includes(failure.decision) &&
+									sameSource(candidate, failure),
+							)
+						)
+							throw Error("WITHHELD_SOURCE_ALIAS_USE_INDEPENDENT_EVIDENCE");
+						if (
+							!state.queue.some((q) => q.url === url) &&
+							!sources.some((s) => (s.links ?? []).some((l) => l.url === url))
+						)
+							throw Error("UNDISCOVERED_URL");
+						if (state.attempted.includes(url))
+							throw Error("URL_ALREADY_ATTEMPTED");
+						const depth =
+							state.queue.find((q) => q.url === url)?.depth ??
+							sources.reduce(
+								(n, s) =>
+									(s.links ?? []).some((l) => l.url === url)
+										? Math.min(
+												n,
+												(state.depths[canonicalUrl(s.finalUrl)] ?? 0) + 1,
+											)
+										: n,
+								Infinity,
+							);
+						if (depth > job.budget.depth) throw Error("DEPTH_LIMIT");
+						output.next.url = url;
 					}
+					const nextAction = output.next;
+					if (nextAction.kind === "search" && state.searchUnavailable)
+						throw Error("SEARCH_UNAVAILABLE_USE_KNOWN_SOURCES_OR_FINISH");
+					if (
+						nextAction.kind === "read" &&
+						!sources.some((s) => s.id === nextAction.sourceId)
+					)
+						throw Error("UNKNOWN_READ_SOURCE");
+					if (
+						nextAction.kind === "read" &&
+						(state.cursors[nextAction.sourceId] ?? 0) >=
+							must(sources.find((s) => s.id === nextAction.sourceId)).text
+								.length
+					)
+						throw Error("SOURCE_ALREADY_READ");
+					if (
+						nextAction.kind === "search" &&
+						state.searched.includes(nextAction.query.trim().toLowerCase())
+					)
+						throw Error("QUERY_ALREADY_SEARCHED");
+					if (
+						nextAction.kind === "finish" &&
+						nextAction.satisfied &&
+						(!output.draft.sections.length || output.draft.openQuestions.length)
+					)
+						throw Error("UNRESOLVED_REQUEST");
 					if (
 						nextAction.kind === "finish" &&
 						!nextAction.satisfied &&
@@ -801,16 +748,20 @@ export class DeliverableEngine {
 						state.content = undefined;
 						state.repair =
 							"未解決の問いと予算が残っています。検索0件なら未確定の略語を引用符で固定せず、展開語や別の切り口で検索してください。拒否URLの再取得は禁止です。追加経路が不適切なら、その具体的理由で未充足終了してください。";
-						save(() => {
-							persistAcceptedDraft();
+						save(() =>
 							event(
 								"reconsider",
 								"未解決の問いに対して別の切り口を確認",
 								nextAction.reason,
-							);
-						});
+							),
+						);
 						return;
 					}
+					const unchanged =
+						JSON.stringify(state.draft) === JSON.stringify(output.draft);
+					state.noGain = content && unchanged ? state.noGain + 1 : 0;
+					state.draft = output.draft;
+					if (!unchanged) state.version++;
 					state.next = output.next;
 					state.content = undefined;
 					state.repair = undefined;
@@ -846,7 +797,20 @@ export class DeliverableEngine {
 									? "search_results"
 									: "retrieval_failed",
 						});
-						persistAcceptedDraft();
+						if (unchanged) return;
+						for (const c of result.claims)
+							this.store.put(job.id, "claim", c.id, c);
+						for (const e of result.evidence)
+							this.store.put(job.id, "evidence", e.id, e);
+						this.persistDraft(job, state, result.artifact, result.knowledge);
+						this.store.event(job.id, "deliverable.updated", {
+							version: state.version,
+							paragraphs: output.draft.sections.reduce(
+								(n, s) => n + s.paragraphs.length,
+								0,
+							),
+							knowledge: output.draft.knowledge.length,
+						});
 					});
 					return;
 				} catch (error) {
