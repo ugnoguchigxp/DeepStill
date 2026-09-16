@@ -250,6 +250,49 @@ test("navigation schema only permits unread source IDs and removes read when exh
 	expect(JSON.stringify(without)).not.toContain('"const":"read"');
 });
 
+test("candidate selection schema binds fetch to supplied candidate IDs", () => {
+	const schema = groundedSchema(
+		"deliverable_step",
+		JSON.stringify({
+			navigationOnly: true,
+			candidateSelection: true,
+			readableSourceIds: [],
+			fetchCandidates: [{ id: "url:official" }, { id: "url:index" }],
+		}),
+	);
+	const encoded = JSON.stringify(schema);
+	expect(encoded).toContain('"enum":["url:official","url:index"]');
+	expect(encoded).toContain('"expectedCoverage"');
+	expect(encoded).not.toContain('"const":"read"');
+	const validate = z.fromJSONSchema(schema);
+	expect(
+		validate.safeParse({
+			draft: null,
+			next: {
+				kind: "fetch",
+				candidateId: "url:official",
+				purpose: "Read the specification",
+				expectedCoverage: ["mechanism", "conditions"],
+				sourceRole: "official_or_primary",
+				novelty: "new_question",
+			},
+		}).success,
+	).toBe(true);
+	expect(
+		validate.safeParse({
+			draft: null,
+			next: {
+				kind: "fetch",
+				candidateId: "url:invented",
+				purpose: "Invented target",
+				expectedCoverage: ["definition"],
+				sourceRole: "unknown",
+				novelty: "unknown",
+			},
+		}).success,
+	).toBe(false);
+});
+
 test("draft citations reject truncated and unread IDs while retaining completed sources", () => {
 	const oldId = "7a650858-6e0b-4bad-a06b-a599bf9c4ab2";
 	const schema = groundedSchema(

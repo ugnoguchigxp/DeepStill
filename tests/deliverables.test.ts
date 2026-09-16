@@ -234,6 +234,141 @@ test("link-first flow updates real artifacts, preserves citations, and produces 
 	}
 });
 
+test("candidate selection fetches only the chosen ID and records its predicted value", async () => {
+	const s = setup();
+	s.job.config.deliveryCandidateSelection = true;
+	s.store.saveJob(s.job);
+	const fetched: string[] = [];
+	try {
+		const e = new Engine(
+			s.store,
+			() => ({
+				...mocks,
+				search: {
+					...mocks.search,
+					async submit(query) {
+						expect(query).toBe("仕組みと条件");
+						return { id: query, cost: 0 };
+					},
+					async poll() {
+						return {
+							ready: true,
+							cost: 0,
+							hits: [
+								{
+									url: "https://example.com/",
+									title: "Homepage",
+									snippet: "Navigation index",
+									rank: 1,
+								},
+								{
+									url: "https://example.com/specification",
+									title: "Mechanism specification",
+									snippet: "Mechanism, conditions, and worked example",
+									rank: 2,
+								},
+							],
+						};
+					},
+				},
+				crawler: {
+					...mocks.crawler,
+					async crawl(url) {
+						fetched.push(url);
+						const base = await mocks.crawler.crawl(
+							url,
+							new AbortController().signal,
+						);
+						const text =
+							"The mechanism preserves the original under condition A.";
+						return { ...base, text, hash: hash(text), links: [] };
+					},
+				},
+				llm: {
+					async complete(kind, input) {
+						if (kind === "deliverable_episode")
+							return { text: JSON.stringify(episode), usage: 100, audit: {} };
+						const data = JSON.parse(input);
+						if (!data.newContent) {
+							expect(data.candidateSelection).toBe(true);
+							expect(data.discoveries).toEqual([]);
+							const selected = data.fetchCandidates.find(
+								(candidate: { title: string }) =>
+									candidate.title === "Mechanism specification",
+							);
+							return {
+								text: JSON.stringify({
+									draft: null,
+									next: {
+										kind: "fetch",
+										candidateId: selected.id,
+										purpose: "Read the denser mechanism source",
+										expectedCoverage: ["mechanism", "conditions"],
+										sourceRole: "official_or_primary",
+										novelty: "new_question",
+									},
+								}),
+								usage: 100,
+								audit: {},
+							};
+						}
+						const source = data.newContent;
+						return {
+							text: JSON.stringify({
+								draft: {
+									...empty,
+									sections: [
+										{
+											title: "Mechanism",
+											paragraphs: [
+												{
+													text: source.lines[0].text,
+													kind: "finding",
+													citations: [
+														{
+															sourceId: source.sourceId,
+															firstLine: source.lines[0].number,
+															lastLine: source.lines[0].number,
+														},
+													],
+												},
+											],
+										},
+									],
+								},
+								next: {
+									kind: "finish",
+									satisfied: true,
+									reason: "Mechanism and condition are explained",
+								},
+							}),
+							usage: 100,
+							audit: {},
+						};
+					},
+				},
+			}),
+			join(s.dir, "artifacts"),
+		);
+		await run(e, s.job.id);
+		const detail = s.store.detail(s.job.id)!;
+		expect(detail.job.status).toBe("completed");
+		expect(fetched).toEqual(["https://example.com/specification"]);
+		const decision = detail.events.find(
+			(event) =>
+				event.type === "research.decision" &&
+				(event.data as { action?: string }).action === "fetch",
+		);
+		expect((decision?.data as { selection?: unknown }).selection).toEqual({
+			expectedCoverage: ["mechanism", "conditions"],
+			sourceRole: "official_or_primary",
+			novelty: "new_question",
+		});
+	} finally {
+		s.close();
+	}
+});
+
 test("section update flow preserves untouched report sections exactly", async () => {
 	const s = setup();
 	s.job.config.deliverySectionUpdates = true;

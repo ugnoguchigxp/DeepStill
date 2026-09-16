@@ -1,4 +1,5 @@
 import {
+	candidateSelectionInstructions,
 	deliverableInstructions,
 	navigationInstructions,
 } from "../research/deliverable-prompts";
@@ -76,10 +77,14 @@ export function prompt(key: PromptKind, source: string) {
 	const compiled = catalog.bind({ instructionLocale: "en-US" })(key, {
 		source,
 	});
-	const system =
+	const baseSystem =
 		key === "deliverable_step" && JSON.parse(source).navigationOnly
 			? `${evidenceContract}\n${navigationInstructions}`
 			: systemInstructions(key);
+	const system =
+		key === "deliverable_step" && JSON.parse(source).candidateSelection
+			? `${baseSystem}\n${candidateSelectionInstructions}`
+			: baseSystem;
 	return {
 		...compiled,
 		system,
