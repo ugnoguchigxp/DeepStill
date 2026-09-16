@@ -1,13 +1,18 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { CodexLlm } from "../packages/llm-provider/codex";
-import type { Draft } from "../packages/research/deliverables";
+import {
+	applySectionUpdate,
+	type Draft,
+	deliverableSectionStepSchema,
+	draftSectionCatalog,
+} from "../packages/research/deliverables";
 import { evaluateDeliverableReplay } from "../packages/research/replay-evaluation";
 
-const [detailArg, operationId, outputArg] = process.argv.slice(2);
+const [detailArg, operationId, outputArg, mode] = process.argv.slice(2);
 if (!detailArg || !operationId || !outputArg)
 	throw Error(
-		"Usage: bun scripts/replay-deliverable.ts <run-detail.json> <operation-id> <output-dir>",
+		"Usage: bun scripts/replay-deliverable.ts <run-detail.json> <operation-id> <output-dir> [--section-update]",
 	);
 
 const detailPath = resolve(detailArg);
@@ -30,6 +35,15 @@ const previous = (input.draft ?? {
 	limitations: [],
 	openQuestions: [],
 }) as Draft;
+const sectionUpdate = mode === "--section-update";
+if (sectionUpdate) {
+	input.sectionUpdate = true;
+	input.sectionCatalog = draftSectionCatalog(previous);
+	input.knowledgeState = previous.knowledge;
+	input.limitationsState = previous.limitations;
+	input.openQuestionsState = previous.openQuestions;
+	delete input.draft;
+}
 
 mkdirSync(outputDir, { recursive: true });
 writeFileSync(
@@ -38,6 +52,7 @@ writeFileSync(
 		{
 			kind: "fixed_source_replay",
 			newWebResearch: false,
+			sectionUpdate,
 			sourceDetail: detailPath,
 			sourceJobId: detail.job.id,
 			sourceOperation: operationId,
@@ -57,7 +72,16 @@ const result = await new CodexLlm().complete(
 	JSON.stringify(input),
 	AbortSignal.timeout(300_000),
 );
-const parsed = JSON.parse(result.text);
+const rawOutput = JSON.parse(result.text);
+const parsed = sectionUpdate
+	? (() => {
+			const value = deliverableSectionStepSchema.parse(rawOutput);
+			return {
+				draft: applySectionUpdate(previous, value.update),
+				next: value.next,
+			};
+		})()
+	: rawOutput;
 const evaluation = evaluateDeliverableReplay(
 	previous,
 	parsed,

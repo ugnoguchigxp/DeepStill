@@ -1,6 +1,10 @@
 import { expect, test } from "vitest";
 import { hash } from "../packages/crawler";
-import type { Draft } from "../packages/research/deliverables";
+import {
+	applySectionUpdate,
+	type Draft,
+	draftSectionCatalog,
+} from "../packages/research/deliverables";
 import { evaluateDeliverableReplay } from "../packages/research/replay-evaluation";
 
 const source = {
@@ -130,4 +134,57 @@ test("fixed-source replay exposes dropped sections and invalid citations", () =>
 	);
 	expect(invalid.valid).toBe(false);
 	expect(invalid.error).toContain("INVALID_SOURCE_REFERENCE");
+});
+
+test("section updates preserve omitted sections and require explicit valid targets", () => {
+	const second: Draft["sections"][number] = {
+		title: "Condition",
+		paragraphs: [
+			{
+				text: "Condition B is still unresolved.",
+				kind: "inference",
+				citations: [{ sourceId: source.id, firstLine: 2, lastLine: 2 }],
+			},
+		],
+	};
+	const initial = { ...previous, sections: [...previous.sections, second] };
+	const catalog = draftSectionCatalog(initial);
+	const replacement: Draft["sections"][number] = {
+		...second,
+		paragraphs: [
+			{
+				text: "Condition B applies.",
+				kind: "finding",
+				citations: [{ sourceId: source.id, firstLine: 2, lastLine: 2 }],
+			},
+		],
+	};
+	const result = applySectionUpdate(initial, {
+		sections: [
+			{
+				operation: "replace",
+				sectionId: catalog[1].sectionId,
+				section: replacement,
+			},
+		],
+		knowledge: [],
+		limitations: [],
+		openQuestions: [],
+	});
+	expect(result.sections[0]).toEqual(initial.sections[0]);
+	expect(result.sections[1]).toEqual(replacement);
+	expect(() =>
+		applySectionUpdate(initial, {
+			sections: [
+				{
+					operation: "delete",
+					sectionId: "missing",
+					reason: "unsupported",
+				},
+			],
+			knowledge: [],
+			limitations: [],
+			openQuestions: [],
+		}),
+	).toThrow("UNKNOWN_SECTION_REFERENCE");
 });

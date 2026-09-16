@@ -233,6 +233,191 @@ test("link-first flow updates real artifacts, preserves citations, and produces 
 		s.close();
 	}
 });
+
+test("section update flow preserves untouched report sections exactly", async () => {
+	const s = setup();
+	s.job.config.deliverySectionUpdates = true;
+	s.store.saveJob(s.job);
+	let contentCalls = 0;
+	try {
+		const e = new Engine(
+			s.store,
+			() => ({
+				...mocks,
+				search: {
+					...mocks.search,
+					async submit() {
+						return { id: "search", cost: 0 };
+					},
+					async poll() {
+						return {
+							ready: true,
+							cost: 0,
+							hits: [
+								{
+									url: "https://example.com/first",
+									title: "First",
+									snippet: "First evidence",
+									rank: 1,
+								},
+							],
+						};
+					},
+				},
+				crawler: {
+					...mocks.crawler,
+					async crawl(url) {
+						const base = await mocks.crawler.crawl(
+							url,
+							new AbortController().signal,
+						);
+						const text = url.endsWith("first")
+							? "Stable mechanism.\nInitial condition."
+							: "Corrected condition.";
+						return {
+							...base,
+							text,
+							hash: hash(text),
+							links: url.endsWith("first")
+								? [
+										{
+											url: "https://example.com/second",
+											text: "Second",
+											context: "Corrected condition",
+											kind: "continuation" as const,
+											section: "Condition",
+										},
+									]
+								: [],
+						};
+					},
+				},
+				llm: {
+					async complete(kind, input) {
+						const d = JSON.parse(input);
+						if (kind === "deliverable_episode")
+							return { text: JSON.stringify(episode), usage: 100, audit: {} };
+						if (!d.newContent)
+							return {
+								text: JSON.stringify({
+									draft: null,
+									next: {
+										kind: "fetch",
+										url: "https://example.com/first",
+										purpose: "Read initial evidence",
+									},
+								}),
+								usage: 100,
+								audit: {},
+							};
+						contentCalls++;
+						const citation = {
+							sourceId: d.newContent.sourceId,
+							firstLine: 1,
+							lastLine: 1,
+						};
+						if (contentCalls === 1)
+							return {
+								text: JSON.stringify({
+									draft: {
+										...empty,
+										sections: [
+											{
+												title: "Stable",
+												paragraphs: [
+													{
+														text: "Stable mechanism.",
+														kind: "finding",
+														citations: [citation],
+													},
+												],
+											},
+											{
+												title: "Condition",
+												paragraphs: [
+													{
+														text: "Initial condition.",
+														kind: "finding",
+														citations: [citation],
+													},
+												],
+											},
+										],
+									},
+									next: {
+										kind: "fetch",
+										url: "https://example.com/second",
+										purpose: "Check the condition",
+									},
+								}),
+								usage: 100,
+								audit: {},
+							};
+						expect(d.sectionUpdate).toBe(true);
+						expect(d.draft).toBeUndefined();
+						expect(d.sectionCatalog).toHaveLength(2);
+						return {
+							text: JSON.stringify({
+								update: {
+									sections: [
+										{
+											operation: "replace",
+											sectionId: d.sectionCatalog[1].sectionId,
+											section: {
+												title: "Condition",
+												paragraphs: [
+													{
+														text: "Corrected condition.",
+														kind: "finding",
+														citations: [citation],
+													},
+												],
+											},
+										},
+									],
+									knowledge: [],
+									limitations: [],
+									openQuestions: [],
+								},
+								next: { kind: "finish", satisfied: true, reason: "Updated" },
+							}),
+							usage: 100,
+							audit: {},
+						};
+					},
+				},
+			}),
+			join(s.dir, "out"),
+		);
+		await run(e, s.job.id);
+		const detail = s.store.detail(s.job.id)!;
+		expect(detail.job.status).toBe("completed");
+		expect(detail.artifacts[0].sections).toEqual([
+			{
+				title: "Stable",
+				paragraphs: [
+					{
+						text: "Stable mechanism.",
+						kind: "finding",
+						claimIds: expect.any(Array),
+					},
+				],
+			},
+			{
+				title: "Condition",
+				paragraphs: [
+					{
+						text: "Corrected condition.",
+						kind: "finding",
+						claimIds: expect.any(Array),
+					},
+				],
+			},
+		]);
+	} finally {
+		s.close();
+	}
+});
 test("search results are compared and four failed fetches allow a focused search and recovery", async () => {
 	const s = setup();
 	const fetched: string[] = [];

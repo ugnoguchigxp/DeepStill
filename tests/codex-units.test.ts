@@ -218,6 +218,24 @@ test("fresh evidence requires a draft while navigation has a compact null schema
 	expect(nav.properties.draft.type).toBe("null");
 });
 
+test("section update schema replaces full drafts and binds citation source IDs", () => {
+	const schema = groundedSchema(
+		"deliverable_step",
+		JSON.stringify({
+			sectionUpdate: true,
+			newContent: { sourceId: "new", lines: [] },
+			sources: [
+				{ id: "old", readUntil: 10, length: 10 },
+				{ id: "new", readUntil: 1, length: 10 },
+			],
+		}),
+	) as unknown as { properties: Record<string, unknown> };
+	const encoded = JSON.stringify(schema);
+	expect(schema.properties.update).toBeTruthy();
+	expect(schema.properties.draft).toBeUndefined();
+	expect(encoded).toContain('"enum":["old","new"]');
+});
+
 test("navigation schema only permits unread source IDs and removes read when exhausted", () => {
 	const withUnread = groundedSchema(
 		"deliverable_step",

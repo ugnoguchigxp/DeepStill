@@ -15,9 +15,12 @@ import { SearchProviderError } from "../../packages/search-provider";
 import { emptyBundle, memoryCandidates } from "../../packages/memory";
 import type { MemoryBundle } from "../../packages/memory/schema";
 import {
+	applySectionUpdate,
 	type Draft,
 	deliverableEpisodeSchema,
+	deliverableSectionStepSchema,
 	deliverableStepSchema,
+	draftSectionCatalog,
 	materialize,
 	type ResearchAction,
 	skillMarkdown,
@@ -521,14 +524,28 @@ export class DeliverableEngine {
 					!recoveryExhausted &&
 					(!state.repair || state.repairKind === "navigation") &&
 					!job.config.deliveryReplay;
+				const sectionUpdate =
+					job.config.deliverySectionUpdates === true &&
+					!!content &&
+					state.draft.sections.length > 0 &&
+					!navigationOnly;
 				const input = JSON.stringify({
 					navigationOnly,
+					sectionUpdate,
 					originalRequest: job.topic,
 					readableSourceIds: sources
 						.filter((s) => (state.cursors[s.id] ?? 0) < s.text.length)
 						.map((s) => s.id),
 					unresolvedQuestions: state.draft.openQuestions,
-					draft: navigationOnly ? undefined : state.draft,
+					draft: navigationOnly || sectionUpdate ? undefined : state.draft,
+					sectionCatalog: sectionUpdate
+						? draftSectionCatalog(state.draft)
+						: undefined,
+					knowledgeState: sectionUpdate ? state.draft.knowledge : undefined,
+					limitationsState: sectionUpdate ? state.draft.limitations : undefined,
+					openQuestionsState: sectionUpdate
+						? state.draft.openQuestions
+						: undefined,
 					reportState: navigationOnly
 						? {
 								sections: state.draft.sections.map((s) => s.title),
@@ -650,7 +667,16 @@ export class DeliverableEngine {
 				);
 				state.sequence++;
 				try {
-					const parsed = deliverableStepSchema.parse(JSON.parse(r.text));
+					const raw = JSON.parse(r.text);
+					const parsed = sectionUpdate
+						? (() => {
+								const value = deliverableSectionStepSchema.parse(raw);
+								return {
+									draft: applySectionUpdate(state.draft, value.update),
+									next: value.next,
+								};
+							})()
+						: deliverableStepSchema.parse(raw);
 					if (content && parsed.draft === null)
 						throw Error("READ_CONTENT_REQUIRES_DRAFT_UPDATE");
 					const output = { ...parsed, draft: parsed.draft ?? state.draft };

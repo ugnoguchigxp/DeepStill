@@ -43,6 +43,19 @@ export function sourceLines(text: string) {
 	return result;
 }
 const citations = z.array(citationSchema).min(1).max(12);
+export const deliverableSection = z.object({
+	title: text.max(200),
+	paragraphs: z
+		.array(
+			z.object({
+				text: text.max(2400),
+				kind: z.enum(["finding", "inference"]),
+				citations,
+			}),
+		)
+		.min(1)
+		.max(8),
+});
 export const skillSchema = z.object({
 	name: text.max(100),
 	description: text.max(500),
@@ -59,23 +72,7 @@ export const deliverableKnowledge = knowledgeSchema
 		skill: skillSchema.nullable(),
 	});
 export const draftSchema = z.object({
-	sections: z
-		.array(
-			z.object({
-				title: text.max(200),
-				paragraphs: z
-					.array(
-						z.object({
-							text: text.max(2400),
-							kind: z.enum(["finding", "inference"]),
-							citations,
-						}),
-					)
-					.min(1)
-					.max(8),
-			}),
-		)
-		.max(10),
+	sections: z.array(deliverableSection).max(10),
 	knowledge: z.array(deliverableKnowledge).max(8),
 	limitations: z.array(text.max(1200)).max(12),
 	openQuestions: z.array(text.max(600)).max(8),
@@ -98,15 +95,108 @@ export const deliverableStepSchema = z.object({
 	draft: draftSchema.nullable(),
 	next: actionSchema,
 });
+export const sectionUpdateSchema = z.object({
+	sections: z
+		.array(
+			z.union([
+				z.object({
+					operation: z.literal("replace"),
+					sectionId: text,
+					section: deliverableSection,
+				}),
+				z.object({
+					operation: z.literal("add"),
+					afterSectionId: text.nullable(),
+					section: deliverableSection,
+				}),
+				z.object({
+					operation: z.literal("delete"),
+					sectionId: text,
+					reason: text.max(400),
+				}),
+			]),
+		)
+		.min(1)
+		.max(6),
+	knowledge: z.array(deliverableKnowledge).max(8),
+	limitations: z.array(text.max(1200)).max(12),
+	openQuestions: z.array(text.max(600)).max(8),
+});
+export const deliverableSectionStepSchema = z.object({
+	update: sectionUpdateSchema,
+	next: actionSchema,
+});
 export const deliverableEpisodeSchema = episodeSchema.omit({
 	id: true,
 	eventIds: true,
 	claimIds: true,
 });
 export type Draft = z.infer<typeof draftSchema>;
+export type SectionUpdate = z.infer<typeof sectionUpdateSchema>;
 export type ResearchAction = z.infer<typeof actionSchema>;
 export const stableId = (s: string) =>
 	createHash("sha256").update(s).digest("hex").slice(0, 24);
+
+export function draftSectionCatalog(draft: Draft) {
+	const occurrences = new Map<string, number>();
+	return draft.sections.map((section) => {
+		const occurrence = occurrences.get(section.title) ?? 0;
+		occurrences.set(section.title, occurrence + 1);
+		return {
+			sectionId: `s:${stableId(`${section.title}:${occurrence}`)}`,
+			...section,
+		};
+	});
+}
+
+export function applySectionUpdate(draft: Draft, update: SectionUpdate): Draft {
+	const catalog = draftSectionCatalog(draft);
+	const originalIds = new Set(catalog.map((section) => section.sectionId));
+	const targeted = new Set<string>();
+	const sections = catalog.map(({ sectionId, ...section }) => ({
+		sectionId,
+		section,
+	}));
+	for (const operation of update.sections) {
+		if (operation.operation === "add") {
+			if (
+				operation.afterSectionId !== null &&
+				!originalIds.has(operation.afterSectionId)
+			)
+				throw Error("UNKNOWN_SECTION_REFERENCE");
+			const index =
+				operation.afterSectionId === null
+					? -1
+					: sections.findIndex(
+							(section) => section.sectionId === operation.afterSectionId,
+						);
+			if (operation.afterSectionId !== null && index < 0)
+				throw Error("SECTION_ALREADY_DELETED");
+			sections.splice(index + 1, 0, {
+				sectionId: `new:${stableId(JSON.stringify(operation.section))}`,
+				section: operation.section,
+			});
+			continue;
+		}
+		if (!originalIds.has(operation.sectionId))
+			throw Error("UNKNOWN_SECTION_REFERENCE");
+		if (targeted.has(operation.sectionId))
+			throw Error("DUPLICATE_SECTION_UPDATE");
+		targeted.add(operation.sectionId);
+		const index = sections.findIndex(
+			(section) => section.sectionId === operation.sectionId,
+		);
+		if (index < 0) throw Error("SECTION_ALREADY_DELETED");
+		if (operation.operation === "delete") sections.splice(index, 1);
+		else sections[index] = { ...sections[index], section: operation.section };
+	}
+	return draftSchema.parse({
+		sections: sections.map((entry) => entry.section),
+		knowledge: update.knowledge,
+		limitations: update.limitations,
+		openQuestions: update.openQuestions,
+	});
+}
 
 /** Citations are attached directly to user-visible paragraphs/knowledge; no LLM claim extraction. */
 export function materialize(

@@ -1,4 +1,5 @@
 import {
+	deliverableSectionStepSchema,
 	deliverableStepSchema,
 	draftSchema,
 	deliverableEpisodeSchema,
@@ -53,11 +54,13 @@ export function groundedSchema(kind: PromptKind, input: string) {
 	if (kind === "deliverable_step") {
 		const data = JSON.parse(input);
 		const schema = z.toJSONSchema(
-			data.navigationOnly
-				? deliverableStepSchema.extend({ draft: z.null() })
-				: data.newContent
-					? deliverableStepSchema.extend({ draft: draftSchema })
-					: deliverableStepSchema,
+			data.sectionUpdate
+				? deliverableSectionStepSchema
+				: data.navigationOnly
+					? deliverableStepSchema.extend({ draft: z.null() })
+					: data.newContent
+						? deliverableStepSchema.extend({ draft: draftSchema })
+						: deliverableStepSchema,
 		);
 		const citedSourceIds = (data.sources ?? [])
 			.filter((source: { readUntil: number }) => source.readUntil > 0)
@@ -72,7 +75,10 @@ export function groundedSchema(kind: PromptKind, input: string) {
 				properties.sourceId = { type: "string", enum: citedSourceIds };
 			for (const child of Object.values(node)) bindCitationIds(child);
 		};
-		if (citedSourceIds.length) bindCitationIds(schema.properties?.draft);
+		if (citedSourceIds.length) {
+			bindCitationIds(schema.properties?.draft);
+			bindCitationIds(schema.properties?.update);
+		}
 		const nextSchema = schema.properties?.next;
 		if (
 			typeof nextSchema === "object" &&
