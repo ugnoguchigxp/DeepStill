@@ -38,6 +38,9 @@
 |2026-09-15|S4C: 引用元IDを既読資料のenumへ制約|存在しないsourceIdの転記誤りをschemaで防ぐ|固定診断では欠落IDを拒否し実在IDを受理。DeepSeek 60→62、画像58→69、可逆圧縮は検索timeout、PGは外部LLM要求timeout。正常完了やliveでの対象エラー発生は確認できず|暫定保持。最終採用未宣言|`39aceaa`、保存ブランチ `codex/experiment-incremental-s4c-20260915`。mainに残存|
 |2026-09-16|L1: 一時的検索障害後に別クエリを1回許可|最初のtimeoutだけで探索を空終了しない|対象テーマでtimeout後の別検索には進んだがbot challenge、資料0件、6点のまま。別テーマの90点はL1分岐未到達|不採用|候補 `7c7a06d`、保存ブランチ `codex/experiment-system-context-l1-20260916`、revert `b2671ee`|
 |2026-09-16|SystemContext S1: 執筆契約を圧縮|Knowledge誤分類を減らし、入力を小さくする|執筆Context 7,661→3,357文字。TypeScript/Wasmは77→80点、Knowledge誤分類は解消。ただし別の検証エラーでpartial、入力+67.5%、要求+84.6%、対象範囲が後退|不採用|候補 `cc22417`、保存ブランチ `codex/experiment-system-context-s1-20260916`、revert `0617b2b`|
+|2026-09-16|R6: 固定ソース再生|同じ資料・同じoperation入力で成果物更新だけを比較する|全文再生成基準で旧15段落の保持0%、1節脱落を再現。provider不要の引用・保持検査も追加|評価基盤として採用|`a6a5151`、詳細 `experiments/STRUCTURAL-20260916.md`|
+|2026-09-16|D2: 有効draftと次行動検証の分離|不正nextでも有効な本文を保存し、navigationだけを訂正する|回帰試験では本文保持と小さい訂正入力を確認。live基準は資料0、候補は6資料で、両方とも対象分岐未到達|採用保留・比較不能。revert|候補 `8921f96`、保存ブランチ `codex/experiment-structural-d2-20260916`、revert `e6e49af`|
+|2026-09-16|U3: 節単位更新|新資料と無関係な既存節をコード側で保持する|固定再生は保持0→80%、節脱落1→0、出力4,175→2,760。liveは対象分岐へ1回到達したが全3節を明示置換し、両方partial。重大な退行なし|限定採用。探索完了率・live保持改善は未達|候補 `ff7b9c2`、保存ブランチ `codex/experiment-structural-u3-20260916`、詳細 `experiments/STRUCTURAL-20260916.md`|
 
 ## 主なlive実行ID
 
@@ -61,6 +64,8 @@
 |SystemContext S1 / Gemini 3.8 live|`9c67003a-0509-404a-b4f6-6a52ace6b32b`|`c3418329-ddd6-4f9f-b8ad-6c101c8c4d81`|両方資料0件、執筆変更未到達|
 |SystemContext S1 / TypeScriptとWasm|`17fa2311-c5bc-4026-ab87-e8339360827e`|`171908e5-d3ea-4e74-9e25-b4361fe78bc8`|77→80だが正常完了・費用は悪化|
 |SystemContext S1 / フロンティアモデルとAGENTS.md|`3f49e647-2edf-4141-93f3-e7d854c8cc97`|`1869a25f-3204-49d9-b05b-adcfc64f2a5b`|両方資料0件、執筆変更未到達|
+|D2 / TypeScriptとWasm|`d8339324-3c9b-4946-a093-1f441d298e57`|`904271b2-fe9b-455d-aef4-e7a1beebef8b`|基準0資料、候補6資料、両方D2分岐未到達|
+|U3 / フロンティアモデルとAGENTS.md|`af106cc4-e03b-49c9-b753-59f311946df3`|`38041bfa-2eba-4001-b9a3-218145c23eae`|共通公式資料1件。候補は節更新へ到達したが全節を明示置換|
 
 ## 現在のコードに残ったもの
 
@@ -83,6 +88,12 @@
 S4Cは唯一、比較実験後もmainへ残っている候補である。理由は、引用元IDの有限候補化が機械的な不変条件として妥当で、固定診断でも狙った誤りを防いだからである。
 
 一方、live比較では基準側にも引用IDエラーが発生せず、DeepSeekの+2点と画像の+11点をS4Cの効果とは断定できなかった。候補は費用増や正常完了の悪化も伴い、4テーマ各2対の採用検証も未完了である。したがってS4Cを「品質改善として採用済み」「80点達成」と表現してはいけない。
+
+### 固定再生基盤R6と限定採用U3
+
+R6は保存済みoperationの入力を再利用し、成果物更新だけを同じ資料で比較できる評価基盤として採用した。live探索を置き換えるものではなく、探索・取得・終了判断の改善判定には使わない。
+
+U3は、全文再生成で起きていた無関係な節の脱落をコード境界で減らすため、新規live jobへ採用した。固定再生では明確に改善したが、liveではモデルが全節を明示置換し、保持改善は確認できなかった。したがって、U3は成果物更新の局所改善であり、探索品質全体の改善とはまだ言えない。`DELIVERY_SECTION_UPDATES=0` で切り戻せる。
 
 ## 失敗から分かったこと
 
@@ -144,6 +155,12 @@ DuckDuckGo timeout、bot challenge、取得ガード、404、外部LLM timeout�
 
 同日実行だけでは十分でない。共通URL、本文hash、失敗操作、候補分岐への到達を照合する。採用候補は基準→候補と候補→基準の順序を入れ替え、複数テーマ・複数対で確認する。
 
+### 10. 部分更新schemaだけでは、部分更新は保証されない
+
+U3のlive試行では、節単位の操作を要求しても、モデルは新資料が関係すると判断した全3節を置換した。schemaが全文draftを禁止しても、全節のreplaceを許せば実質的な全文再生成になり得る。
+
+一方、置換数を機械的に1件へ制限すると、複数節に及ぶ訂正や反証を取り込めない。保持率だけを目標にせず、固定再生のような「新資料と無関係な節」が分かる条件と、liveで本当に複数節へ影響した条件を分けて評価する。
+
 ## 次の改善で優先すること
 
 1. `WITHHELD_SOURCE_ALIAS_USE_INDEPENDENT_EVIDENCE` と `URL_ALREADY_ATTEMPTED` を、自由文の注意ではなく回復可能な状態遷移として設計する。
@@ -177,6 +194,7 @@ DuckDuckGo timeout、bot challenge、取得ガード、404、外部LLM timeout�
 |S2要約|[archived/S2-WORKED-EXAMPLE-20260915.md](archived/S2-WORKED-EXAMPLE-20260915.md)|
 |S3要約|[archived/S3-PRESERVATION-20260915.md](archived/S3-PRESERVATION-20260915.md)|
 |最新L1・SystemContext S1|[archived/SYSTEM-CONTEXT-TUNING-20260916.md](archived/SYSTEM-CONTEXT-TUNING-20260916.md)|
+|R6・D2・U3|[experiments/STRUCTURAL-20260916.md](experiments/STRUCTURAL-20260916.md)|
 
 生ログは主に次の配下にある。
 
