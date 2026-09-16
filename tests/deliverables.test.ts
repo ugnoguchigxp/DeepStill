@@ -1192,6 +1192,109 @@ test("invalid navigation stays compact and can move from a completed source to n
 	}
 });
 
+test("a valid draft is persisted before invalid navigation is repaired compactly", async () => {
+	const s = setup();
+	let repairInputBytes = 0;
+	let writingInputBytes = 0;
+	try {
+		const e = new Engine(
+			s.store,
+			() => ({
+				...mocks,
+				llm: {
+					async complete(kind, input) {
+						const data = JSON.parse(input);
+						if (kind === "deliverable_episode")
+							return { text: JSON.stringify(episode), usage: 100, audit: {} };
+						if (data.newContent) {
+							writingInputBytes = Buffer.byteLength(input);
+							const line = data.newContent.lines[0];
+							return {
+								text: JSON.stringify({
+									draft: {
+										...empty,
+										sections: [
+											{
+												title: "保存できる説明",
+												paragraphs: [
+													{
+														text: line.text,
+														kind: "finding",
+														citations: [
+															{
+																sourceId: data.newContent.sourceId,
+																firstLine: line.number,
+																lastLine: line.number,
+															},
+														],
+													},
+												],
+											},
+										],
+									},
+									next: {
+										kind: "fetch",
+										url: data.sources[0].url,
+										purpose: "誤って取得済みURLを再選択",
+									},
+								}),
+								usage: 100,
+								audit: {},
+							};
+						}
+						if (data.validationError) {
+							repairInputBytes = Buffer.byteLength(input);
+							expect(data.validationError).toContain("URL_ALREADY_ATTEMPTED");
+							expect(data.navigationOnly).toBe(true);
+							expect(data.draft).toBeUndefined();
+							expect(data.newContent).toBeNull();
+							return {
+								text: JSON.stringify({
+									draft: null,
+									next: {
+										kind: "finish",
+										satisfied: true,
+										reason: "保存済み説明で完了",
+									},
+								}),
+								usage: 100,
+								audit: {},
+							};
+						}
+						return {
+							text: JSON.stringify({
+								draft: null,
+								next: {
+									kind: "fetch",
+									url: data.discoveries[0].url,
+									purpose: "最初の本文を確認",
+								},
+							}),
+							usage: 100,
+							audit: {},
+						};
+					},
+				},
+			}),
+			join(s.dir, "artifacts"),
+		);
+		await run(e, s.job.id);
+		const detail = s.store.detail(s.job.id)!;
+		expect(detail.job.status).toBe("completed");
+		expect(detail.artifacts.at(-1)?.sections?.[0].title).toBe("保存できる説明");
+		expect(repairInputBytes).toBeLessThan(writingInputBytes);
+		expect(
+			detail.events.some(
+				(event) =>
+					event.type === "deliverable.invalid" &&
+					(event.data as { draftSaved?: boolean }).draftSaved === true,
+			),
+		).toBe(true);
+	} finally {
+		s.close();
+	}
+});
+
 test("long document indexes retain late reference links in the reader input", async () => {
 	const s = setup();
 	let sawLateLink = false;
