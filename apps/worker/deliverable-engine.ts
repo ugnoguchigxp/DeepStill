@@ -53,7 +53,6 @@ interface Flow {
 	content?: { sourceId: string; start: number; end: number; text: string };
 	searchId?: string;
 	searchUnavailable?: string;
-	searchFailures?: number;
 	lastSearch?: { query: string; hitCount: number; newUrls: string[] };
 	finishReconsidered?: number;
 	failuresDetail?: {
@@ -320,7 +319,6 @@ export class DeliverableEngine {
 						hitCount: hits.length,
 						newUrls: hits.map((h) => h.url),
 					};
-					state.searchFailures = 0;
 					const searchSequence = state.sequence;
 					state.searchId = undefined;
 					state.sequence++;
@@ -928,27 +926,15 @@ export class DeliverableEngine {
 		} catch (error) {
 			if (error instanceof LeaseLost) throw error;
 			if (signal.aborted) throw error;
-			if (error instanceof SearchProviderError) {
-				state.searchFailures = (state.searchFailures ?? 0) + 1;
-				const retryWithAnotherQuery =
-					error.retryable && state.searchFailures < 2;
-				state.searchUnavailable = retryWithAnotherQuery
-					? undefined
-					: error.message;
-				state.lastSearch = {
-					query: state.searched.at(-1) ?? "",
-					hitCount: 0,
-					newUrls: [],
-				};
+			if (error instanceof SearchProviderError && !error.retryable) {
+				state.searchUnavailable = error.message;
 				state.searchId = undefined;
 				state.sequence++;
 				reconsider();
 				save(() =>
 					event(
 						"search_failed",
-						retryWithAnotherQuery
-							? "一時的な検索失敗のため条件を変えて再試行"
-							: "検索を停止し既知の資料から再検討",
+						"検索を停止し既知の資料から再検討",
 						error.message,
 					),
 				);
