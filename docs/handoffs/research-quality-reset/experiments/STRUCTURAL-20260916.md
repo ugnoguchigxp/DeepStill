@@ -43,6 +43,23 @@ draftのschema・引用・読了範囲が有効なら、次行動の検証前に
 - 期待: 有効な新稿が不正nextで失われず、訂正入力が小さくなる。
 - 反証: 不正引用や不完全Knowledgeまで保存する、同じ本文を飛ばす、修正呼び出しが増える、内容・正常完了・費用が改善しない。
 
+### D2初期結果
+
+- 候補コミット: `8921f96`。保存ブランチ: `codex/experiment-structural-d2-20260916`。
+- `bun run verify` 成功。38ファイル248テスト。既存lint warningのみ。
+- deterministic回帰では、有効draftと引用を保存した後、`URL_ALREADY_ATTEMPTED` を含む訂正入力が `navigationOnly=true`、`draft` なし、`newContent=null` になり、元の執筆入力より小さくなった。最終jobはcompletedとなり、保存本文を保持した。
+
+live初期対は `typescriptとwasm`。
+
+|条件|実行ID|終了|資料|入力/出力|D2分岐|
+|---|---|---|---:|---:|---|
+|基準 `a6a5151`|`d8339324-3c9b-4946-a093-1f441d298e57`|partial / unresolved_questions|0|10,881 / 632|初回検索timeoutのため未到達|
+|D2候補 `8921f96`|`904271b2-fe9b-455d-aef4-e7a1beebef8b`|partial / unresolved_questions|6|161,784 / 27,500|`deliverable.invalid` 0件で未到達|
+
+候補側は6資料・7回の成果物更新まで進み、別の検索timeout後に既知資料を使って未充足終了した。重大なruntime回帰は観測していないが、基準側は資料0件で、候補側にもD2対象エラーが発生していない。したがって内容点や正常終了をD2の効果とは扱わない。
+
+D2は機械的不変条件としては期待どおりだが、live品質改善は未検証のため採用保留とする。U3へ効果を混ぜないようmainでは一度revertし、候補ブランチを保持する。
+
 ## U3仮説: 節単位更新
 
 ### 観測
