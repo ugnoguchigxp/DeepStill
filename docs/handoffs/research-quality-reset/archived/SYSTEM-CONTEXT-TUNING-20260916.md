@@ -52,6 +52,29 @@
 
 L1が狙った行動変化は確認できたが、唯一到達したテーマの固定評価点は6点のままで、入力は5,845、出力は275増えた。残る2テーマはL1分岐に入っておらず、内容改善を変更効果とは扱えない。主指標の改善を確認できないため不採用とし、保存ブランチを確認後にmainでrevertする。
 
-### S1
+### S1結果: Knowledge誤分類は改善したが、正常完了・費用が悪化したため不採用
 
-実測後に追記する。テスト通過やSystemContext短縮だけでは採用しない。
+候補コミット `cc22417`、保存ブランチ `codex/experiment-system-context-s1-20260916`。書き込み用SystemContextだけを変更し、navigation用SystemContext、schema、制御ロジックは変更していない。`bun run verify` は37ファイル245テスト、typecheck/lint/format/build/docsを含め成功した。
+
+書き込み用SystemContextは7,661文字から3,357文字へ56.2%短縮された。`typescriptとwasm` では書き込み呼び出し数は基準・S1とも8回であり、短縮自体は監査上確認できた。一方、navigation呼び出しは5回から14回へ増え、全入力tokenは減らなかった。
+
+|テーマ|実行ID|終了|入力/出力|点|比較判定|
+|---|---|---|---:|---:|---|
+|gemini 3.8 live|`c3418329-ddd6-4f9f-b8ad-6c101c8c4d81`|partial / unresolved_questions|10,910 / 566|6|初回検索timeout、資料0件。書き込み変更へ未到達|
+|typescriptとwasm|`171908e5-d3ea-4e74-9e25-b4361fe78bc8`|partial / invalid_deliverable|294,154 / 33,795|80|比較対象。Knowledge誤分類は消えたが別の検証エラーで失敗|
+|フロンティアモデルではAGENTS.mdは不要に|`1869a25f-3204-49d9-b05b-adcfc64f2a5b`|partial / unresolved_questions|10,957 / 537|6|初回検索bot challenge、資料0件。書き込み変更へ未到達|
+
+`typescriptとwasm` の80点内訳は、対象同定12/15、探索・情報増分17/25、根拠18/20、説明17/20、Knowledge 10/12、Episode 6/8。6資料・21 claimから、AssemblyScriptの型制約、線形メモリ、GC、UTF-8/UTF-16境界を条件付きで説明し、Knowledge 5件をすべて `rule / skill=null` にできた。基準の `SKILL_REQUIRES_PROCEDURE` は再発しておらず、S1が狙った局所的な行動改善は見られた。ただし、短い依頼の別解釈である「他言語製WasmをTypeScriptから使う」側の説明は基準より薄く、最終操作は `WITHHELD_SOURCE_ALIAS_USE_INDEPENDENT_EVIDENCE` で無効になった。
+
+ガードレールは悪化した。比較可能なテーマの終了状態は基準と同じ `partial / invalid_deliverable` で、入力は175,647から294,154へ67.5%、要求数は26から48へ84.6%増えた。出力も30,085から33,795へ増えた。固定内容点は3点上がったが、正常完了を回復せず、大幅な費用増と対象範囲の後退を伴うため、総合改善とは判定しない。S1は不採用とし、保存ブランチを残してmainからrevertする。
+
+## 実験全体の使用量
+
+|段階|入力token|出力token|要求|query|保存資料|
+|---|---:|---:|---:|---:|---:|
+|基準|197,512|31,315|34|4|6|
+|L1|265,458|36,907|47|6|8|
+|S1|316,021|34,898|56|7|6|
+|合計|778,991|103,120|137|17|20|
+
+外部検索障害で資料0件だった対は、SystemContext変更の勝敗から除外した。今回の結論は、検索回復をプロンプトへ寄せず制御状態として扱うこと、書き込み契約の短縮と探索終了規則の変更を同時に行わないこと、alias/withheld由来の訂正失敗を具体的な状態遷移として次の独立実験にすること、の3点である。
