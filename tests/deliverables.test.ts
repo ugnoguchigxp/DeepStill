@@ -80,6 +80,60 @@ test("HTML retains contextual body links, continuation and headings without foot
 		actionSchema.safeParse({ kind: "read", sourceId: "x", done: true }).success,
 	).toBe(false);
 });
+test("optional initial query planning replaces the literal topic search", async () => {
+	const s = setup();
+	s.job.config.deliveryQueryPlanning = true;
+	s.store.saveJob(s.job);
+	let submitted = "";
+	try {
+		const e = new Engine(
+			s.store,
+			() => ({
+				...mocks,
+				search: {
+					...mocks.search,
+					async submit(query) {
+						submitted = query;
+						return { id: "planned-search", cost: 0 };
+					},
+				},
+				llm: {
+					async complete(kind, input) {
+						expect(kind).toBe("deliverable_step");
+						const data = JSON.parse(input);
+						expect(data.initialPlanning).toBe(true);
+						expect(data.originalRequest).toBe("仕組みと条件");
+						return {
+							text: JSON.stringify({
+								draft: null,
+								next: {
+									kind: "search",
+									query: "仕組み 動作原理 適用条件",
+									purpose: "定義と適用条件を説明する資料を探す",
+								},
+							}),
+							usage: 100,
+							audit: {},
+						};
+					},
+				},
+			}),
+			join(s.dir, "out"),
+		);
+		for (let i = 0; i < 20 && !submitted; i++) await e.tick(s.job.id);
+		const detail = s.store.detail(s.job.id);
+		expect(
+			submitted,
+			JSON.stringify({ job: detail?.job, events: detail?.events }),
+		).toBe("仕組み 動作原理 適用条件");
+		expect(s.store.detail(s.job.id)?.queries[0]).toMatchObject({
+			query: submitted,
+			reason: "定義と適用条件を説明する資料を探す",
+		});
+	} finally {
+		s.close();
+	}
+});
 test("link-first flow updates real artifacts, preserves citations, and produces one Episode without intermediate LLM stages", async () => {
 	const s = setup();
 	const calls: string[] = [];

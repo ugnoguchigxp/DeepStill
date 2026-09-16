@@ -3,6 +3,7 @@ import {
 	deliverableStepSchema,
 	draftSchema,
 	deliverableEpisodeSchema,
+	initialSearchStepSchema,
 } from "../research/deliverables";
 import { fulfillmentSchema } from "../research/fulfillment";
 import { retrievalStepSchema } from "../memory/retrieval";
@@ -54,13 +55,15 @@ export function groundedSchema(kind: PromptKind, input: string) {
 	if (kind === "deliverable_step") {
 		const data = JSON.parse(input);
 		const schema = z.toJSONSchema(
-			data.sectionUpdate
-				? deliverableSectionStepSchema
-				: data.navigationOnly
-					? deliverableStepSchema.extend({ draft: z.null() })
-					: data.newContent
-						? deliverableStepSchema.extend({ draft: draftSchema })
-						: deliverableStepSchema,
+			data.initialPlanning
+				? initialSearchStepSchema
+				: data.sectionUpdate
+					? deliverableSectionStepSchema
+					: data.navigationOnly
+						? deliverableStepSchema.extend({ draft: z.null() })
+						: data.newContent
+							? deliverableStepSchema.extend({ draft: draftSchema })
+							: deliverableStepSchema,
 		);
 		const citedSourceIds = (data.sources ?? [])
 			.filter((source: { readUntil: number }) => source.readUntil > 0)

@@ -57,6 +57,7 @@ interface Flow {
 	searchId?: string;
 	searchUnavailable?: string;
 	lastSearch?: { query: string; hitCount: number; newUrls: string[] };
+	initialPlanningPending?: boolean;
 	finishReconsidered?: number;
 	failuresDetail?: {
 		url: string;
@@ -114,8 +115,9 @@ export class DeliverableEngine {
 			return;
 		}
 		if (!job.startedAt) {
+			const initialPlanning = job.config.deliveryQueryPlanning === true;
 			state = {
-				phase: "act",
+				phase: initialPlanning ? "write" : "act",
 				sequence: 0,
 				version: 0,
 				next: {
@@ -129,6 +131,7 @@ export class DeliverableEngine {
 				searched: [],
 				cursors: {},
 				depths: {},
+				initialPlanningPending: initialPlanning,
 				poll: 0,
 				failures: 0,
 				noGain: 0,
@@ -502,6 +505,11 @@ export class DeliverableEngine {
 			if (state.phase === "write") {
 				const content = state.content;
 				const sources = this.store.all<Snapshot>(job.id, "source");
+				const initialPlanning =
+					job.config.deliveryQueryPlanning === true &&
+					state.initialPlanningPending === true &&
+					!content &&
+					!sources.length;
 				const recoveryExhausted = state.failures >= 8;
 				// A retrieval stop adds no evidence. Preserve the last validated draft;
 				// asking the writer to finalize here can silently discard explanations.
@@ -530,6 +538,7 @@ export class DeliverableEngine {
 					state.draft.sections.length > 0 &&
 					!navigationOnly;
 				const input = JSON.stringify({
+					initialPlanning,
 					navigationOnly,
 					sectionUpdate,
 					originalRequest: job.topic,
@@ -680,6 +689,9 @@ export class DeliverableEngine {
 					if (content && parsed.draft === null)
 						throw Error("READ_CONTENT_REQUIRES_DRAFT_UPDATE");
 					const output = { ...parsed, draft: parsed.draft ?? state.draft };
+					if (initialPlanning && output.next.kind !== "search")
+						throw Error("INITIAL_PLANNING_REQUIRES_SEARCH");
+					if (initialPlanning) state.initialPlanningPending = false;
 					if (recoveryExhausted && output.next.kind !== "finish")
 						throw Error("RECOVERY_LIMIT_FINISH_REQUIRED");
 					const result = materialize(

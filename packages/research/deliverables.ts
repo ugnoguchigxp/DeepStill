@@ -77,14 +77,15 @@ export const draftSchema = z.object({
 	limitations: z.array(text.max(1200)).max(12),
 	openQuestions: z.array(text.max(600)).max(8),
 });
+export const searchActionSchema = z.object({
+	kind: z.literal("search"),
+	query: text.max(300),
+	purpose: text.max(400),
+});
 export const actionSchema = z.union([
 	z.object({ kind: z.literal("read"), sourceId: text, purpose: text.max(400) }),
 	z.object({ kind: z.literal("fetch"), url: text, purpose: text.max(400) }),
-	z.object({
-		kind: z.literal("search"),
-		query: text.max(300),
-		purpose: text.max(400),
-	}),
+	searchActionSchema,
 	z.object({
 		kind: z.literal("finish"),
 		satisfied: z.boolean(),
@@ -94,6 +95,10 @@ export const actionSchema = z.union([
 export const deliverableStepSchema = z.object({
 	draft: draftSchema.nullable(),
 	next: actionSchema,
+});
+export const initialSearchStepSchema = z.object({
+	draft: z.null(),
+	next: searchActionSchema,
 });
 export const sectionUpdateSchema = z.object({
 	sections: z

@@ -206,6 +206,15 @@ test("inspectCodex accepts a current CLI and rejects an old one", () => {
 });
 
 test("fresh evidence requires a draft while navigation has a compact null schema", () => {
+	const initial = groundedSchema(
+		"deliverable_step",
+		JSON.stringify({ initialPlanning: true, navigationOnly: true }),
+	) as unknown as {
+		properties: {
+			draft: { type: string };
+			next: { properties: { kind: { const: string } } };
+		};
+	};
 	const fresh = groundedSchema(
 		"deliverable_step",
 		JSON.stringify({ newContent: { lines: [] } }),
@@ -216,6 +225,8 @@ test("fresh evidence requires a draft while navigation has a compact null schema
 	) as unknown as { properties: { draft: { type: string } } };
 	expect(fresh.properties.draft.type).toBe("object");
 	expect(nav.properties.draft.type).toBe("null");
+	expect(initial.properties.draft.type).toBe("null");
+	expect(initial.properties.next.properties.kind.const).toBe("search");
 });
 
 test("section update schema replaces full drafts and binds citation source IDs", () => {

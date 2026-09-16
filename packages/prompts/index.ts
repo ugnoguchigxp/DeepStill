@@ -1,5 +1,6 @@
 import {
 	deliverableInstructions,
+	initialPlanningInstructions,
 	navigationInstructions,
 } from "../research/deliverable-prompts";
 import { evidenceContract } from "./contracts";
@@ -76,10 +77,13 @@ export function prompt(key: PromptKind, source: string) {
 	const compiled = catalog.bind({ instructionLocale: "en-US" })(key, {
 		source,
 	});
+	const data = key === "deliverable_step" ? JSON.parse(source) : {};
 	const system =
-		key === "deliverable_step" && JSON.parse(source).navigationOnly
-			? `${evidenceContract}\n${navigationInstructions}`
-			: systemInstructions(key);
+		key === "deliverable_step" && data.initialPlanning
+			? `${evidenceContract}\n${initialPlanningInstructions}`
+			: key === "deliverable_step" && data.navigationOnly
+				? `${evidenceContract}\n${navigationInstructions}`
+				: systemInstructions(key);
 	return {
 		...compiled,
 		system,
