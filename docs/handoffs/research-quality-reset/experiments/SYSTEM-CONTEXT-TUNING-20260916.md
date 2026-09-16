@@ -40,4 +40,18 @@
 
 ## 採否
 
-実測後に追記する。テスト通過だけでは採用しない。
+### L1結果: 分岐は改善、内容点は改善せず不採用
+
+候補コミット `7c7a06d`、保存ブランチ `codex/experiment-system-context-l1-20260916`。`bun run verify` は37ファイル246テスト、typecheck/lint/format/build/docsを含め成功した。
+
+|テーマ|実行ID|終了|入力/出力|点|候補分岐|
+|---|---|---|---:|---:|---|
+|gemini 3.8 live|`4f3a0162-da94-4df1-bbed-1791f985e6e3`|partial / unresolved_questions|16,759 / 923|6|到達。timeout後に別クエリへ進んだがbot challengeで資料0件|
+|typescriptとwasm|`3adc0f16-6728-49ee-8abd-ce43440029c7`|partial / invalid_deliverable|204,570 / 31,151|82|未到達。内容差は候補効果に帰属しない|
+|フロンティアモデルではAGENTS.mdは不要に|`809dfc84-8d33-40af-825c-6c7e48916872`|completed / satisfied|44,129 / 4,833|90|未到達。基準のtimeoutに対して候補時は初回検索成功で比較不能|
+
+L1が狙った行動変化は確認できたが、唯一到達したテーマの固定評価点は6点のままで、入力は5,845、出力は275増えた。残る2テーマはL1分岐に入っておらず、内容改善を変更効果とは扱えない。主指標の改善を確認できないため不採用とし、保存ブランチを確認後にmainでrevertする。
+
+### S1
+
+実測後に追記する。テスト通過やSystemContext短縮だけでは採用しない。
