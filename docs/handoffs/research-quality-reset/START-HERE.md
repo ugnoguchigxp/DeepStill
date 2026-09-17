@@ -275,6 +275,7 @@ curl -sS -X POST http://127.0.0.1:4310/api/jobs \
 |[L1・SystemContext圧縮](archived/SYSTEM-CONTEXT-TUNING-20260916.md)|検索回復は外部障害で増分なし。Context短縮は呼び出し増で総token悪化|一回の指示長ではなく、検索・取得・執筆の総回数と増分を見る|
 |[R6・D2・U3](experiments/STRUCTURAL-20260916.md)|固定再生基盤は採用。D2と節更新はlive改善未確認で保留|固定再生の保持改善をlive探索品質と混同しない|
 |[Q1: 初回query計画](experiments/SEARCH-QUALITY-Q1-20260917.md)|DuckDBは改善したが、可逆圧縮は探索不変、local llmは費用・終了・まとまりが悪化して不採用|全テーマを事前LLM計画へ通さない。query生成とURL選択・終了制御を一度に変えない|
+|[U1: URL候補選択](experiments/SEARCH-URL-SELECTION-U1-20260917.md)|local llmは改善したが、DuckDBはほぼ同じ入力で公式範囲・本文・Knowledgeが後退して不採用|候補単体の自己評価ではなく、未解決点×候補×既読重複を相対比較する|
 |[現状スナップショット](experiments/STATUS-20260915.md)|当時の実装・試行状態|現在のmainとの差分を確認してから使う|
 |[Pi由来の仮説](PI-HARNESS-HYPOTHESES.md) / [計画](PI-HARNESS-IMPLEMENTATION-PLAN.md)|未実施案を含む初期候補集|現在の履歴で反証済みの前提を除いて再評価する|
 

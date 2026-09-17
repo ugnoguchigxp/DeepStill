@@ -42,6 +42,7 @@
 |2026-09-16|D2: 有効draftと次行動検証の分離|不正nextでも有効な本文を保存し、navigationだけを訂正する|回帰試験では本文保持と小さい訂正入力を確認。live基準は資料0、候補は6資料で、両方とも対象分岐未到達|採用保留・比較不能。revert|候補 `8921f96`、保存ブランチ `codex/experiment-structural-d2-20260916`、revert `e6e49af`|
 |2026-09-16|U3: 節単位更新|新資料と無関係な既存節をコード側で保持する|固定再生は保持0→80%、節脱落1→0、出力4,175→2,760。liveは対象分岐へ1回到達したが全3節を明示置換し、両方partial|採用保留。コードはフラグ配下に残すが既定無効|候補 `ff7b9c2`、保存ブランチ `codex/experiment-structural-u3-20260916`、詳細 `experiments/STRUCTURAL-20260916.md`|
 |2026-09-17|Q1: 初回queryをLLMで計画|短い原依頼を、中心語を保った検索向けqueryへ整える|DuckDBは高密度な公式ページへ改善。可逆圧縮は同じ資料のまま入力+19.2%。local llmは公式資料が増えたが入力+156.0%、要求+143.5%、本文-13.9%、`invalid_deliverable`|不採用。mainへ未導入|候補 `cdf7ad9`、保存ブランチ `codex/experiment-search-q1-20260917`、詳細 `experiments/SEARCH-QUALITY-Q1-20260917.md`|
+|2026-09-17|U1: 候補IDと密度・一次性・重複予測によるURL選択|実行可能な候補を比較し、高密度・一次・非重複URLを優先する|local llmは正常完了・本文+94.9%・入力-26.2%。DuckDBは入力-1.6%だが本文-36.3%、段落-33.3%、Knowledge 4→3。13 fetch中12件を `new_question` と自己評価し重複判定が機能せず|不採用|候補 `c282f6f`、保存ブランチ `codex/experiment-search-url-u1-20260917`、詳細 `experiments/SEARCH-URL-SELECTION-U1-20260917.md`|
 
 ## 主なlive実行ID
 
@@ -70,6 +71,9 @@
 |Q1 / local llm|`a56ae1ce-4756-4f1c-916c-fcb706d8bf4b`|`a18e0a38-0d70-4f9b-bbd7-6ec87e253f91`|公式資料は増えたが、候補は費用増・本文短縮・invalid_deliverable|
 |Q1 / 可逆圧縮|`5eca2e6f-14ca-42d0-9607-575b5459a530`|`3fec7f16-4dd7-41d9-8b86-bef975b96c02`|同一URL・同一本文。表現だけ小幅改善し、入力+19.2%|
 |Q1 / duck db|`fa81ebca-bbc3-4406-b742-d5a584d81fab`|`909b80f2-7724-42d8-ad0b-5f468203239c`|公式トップからWhy DuckDBへ移り、機構説明が改善|
+|U1 / local llm|`0802847d-585d-489f-bc4c-82e794fb126f`|`684ac48a-8b25-44e7-9eae-0a6e2cd87ecb`|候補は正常完了、入力-26.2%、本文+94.9%。類似記事をすべて新規扱い|
+|U1 / 可逆圧縮|`c2143415-5b59-4912-8add-6e2893e6c72c`|`67ffeb7e-4174-45a8-884c-ebbebcf36201`|候補は正常完了。基準は深掘り後の外部LLM abortで比較不能|
+|U1 / duck db|`57820cf5-9f08-48dd-875d-a9660824c0d7`|`b32bdcc2-4704-4c71-a533-be73abe81322`|共通検索結果8件。候補は要求減だが公式範囲・本文・Knowledgeが後退|
 
 ## 現在のコードに残ったもの
 
@@ -171,6 +175,12 @@ Q1では、短い製品名 `duck db` を `DuckDB definition` に直すことで�
 
 queryの見た目の良さ、一次資料数、Knowledge件数を個別に採用根拠にしない。最初のquery、検索結果集合、URL選択、読後の情報増分、停止判断、最終成果物を一続きで評価する。ただし次の実験では一要因ずつ変え、query生成とURL選択・終了制御を同時に変更しない。
 
+### 12. 候補ごとの自己評価は、候補間比較にならない
+
+U1はfetch候補ごとに期待coverage、source role、noveltyを出力させたが、13回中12回を `new_question` と評価した。local llmの類似解説記事群でも重複見込みを認識せず、DuckDBでは高密度な二次解説を選ぶ代わりに、複数の公式ページが別々に提供していたSQL、client、互換性、Python情報を失った。
+
+URL単体を「高密度」と評価しても、原依頼の必要事項全体を十分に覆うとは限らない。次回は、未解決点×候補URLの相対対応、既読資料との主張重複、一次資料を複数読む価値を同じ表で比較する。自己申告欄を増やすだけの再試行はしない。
+
 ## 次の改善で優先すること
 
 1. `WITHHELD_SOURCE_ALIAS_USE_INDEPENDENT_EVIDENCE` と `URL_ALREADY_ATTEMPTED` を、自由文の注意ではなく回復可能な状態遷移として設計する。
@@ -207,6 +217,7 @@ queryの見た目の良さ、一次資料数、Knowledge件数を個別に採用
 |最新L1・SystemContext S1|[archived/SYSTEM-CONTEXT-TUNING-20260916.md](archived/SYSTEM-CONTEXT-TUNING-20260916.md)|
 |R6・D2・U3|[experiments/STRUCTURAL-20260916.md](experiments/STRUCTURAL-20260916.md)|
 |Q1 初回query計画|[experiments/SEARCH-QUALITY-Q1-20260917.md](experiments/SEARCH-QUALITY-Q1-20260917.md)|
+|U1 URL候補選択|[experiments/SEARCH-URL-SELECTION-U1-20260917.md](experiments/SEARCH-URL-SELECTION-U1-20260917.md)|
 
 生ログは主に次の配下にある。
 
