@@ -37,7 +37,7 @@ U1ではquery生成、検索、取得、読解、成果物更新、予算、終�
 
 ## 候補結果
 
-候補コミットは `c282f6f`、保存ブランチは `codex/experiment-search-url-u1-20260917`。`DELIVERY_CANDIDATE_SELECTION=1` の場合だけU1を有効にした。query生成・検索処理・予算・終了条件は変更していない。
+候補コミットは `c282f6f`、結果記録は `a9fbdfb`、mainからのrevertは `01606c6`。候補と結果は保存ブランチ `codex/experiment-search-url-u1-20260917` に残した。`DELIVERY_CANDIDATE_SELECTION=1` の場合だけU1を有効にした。query生成・検索処理・予算・終了条件は変更していない。
 
 |テーマ|実行ID|終了|query / URL / 資料|入力 / 出力|要求|成果物|
 |---|---|---|---:|---:|---:|---|

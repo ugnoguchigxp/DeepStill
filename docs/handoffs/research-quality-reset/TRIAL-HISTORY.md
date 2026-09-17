@@ -42,7 +42,7 @@
 |2026-09-16|D2: 有効draftと次行動検証の分離|不正nextでも有効な本文を保存し、navigationだけを訂正する|回帰試験では本文保持と小さい訂正入力を確認。live基準は資料0、候補は6資料で、両方とも対象分岐未到達|採用保留・比較不能。revert|候補 `8921f96`、保存ブランチ `codex/experiment-structural-d2-20260916`、revert `e6e49af`|
 |2026-09-16|U3: 節単位更新|新資料と無関係な既存節をコード側で保持する|固定再生は保持0→80%、節脱落1→0、出力4,175→2,760。liveは対象分岐へ1回到達したが全3節を明示置換し、両方partial|採用保留。コードはフラグ配下に残すが既定無効|候補 `ff7b9c2`、保存ブランチ `codex/experiment-structural-u3-20260916`、詳細 `experiments/STRUCTURAL-20260916.md`|
 |2026-09-17|Q1: 初回queryをLLMで計画|短い原依頼を、中心語を保った検索向けqueryへ整える|DuckDBは高密度な公式ページへ改善。可逆圧縮は同じ資料のまま入力+19.2%。local llmは公式資料が増えたが入力+156.0%、要求+143.5%、本文-13.9%、`invalid_deliverable`|不採用。mainへ未導入|候補 `cdf7ad9`、保存ブランチ `codex/experiment-search-q1-20260917`、詳細 `experiments/SEARCH-QUALITY-Q1-20260917.md`|
-|2026-09-17|U1: 候補IDと密度・一次性・重複予測によるURL選択|実行可能な候補を比較し、高密度・一次・非重複URLを優先する|local llmは正常完了・本文+94.9%・入力-26.2%。DuckDBは入力-1.6%だが本文-36.3%、段落-33.3%、Knowledge 4→3。13 fetch中12件を `new_question` と自己評価し重複判定が機能せず|不採用|候補 `c282f6f`、保存ブランチ `codex/experiment-search-url-u1-20260917`、詳細 `experiments/SEARCH-URL-SELECTION-U1-20260917.md`|
+|2026-09-17|U1: 候補IDと密度・一次性・重複予測によるURL選択|実行可能な候補を比較し、高密度・一次・非重複URLを優先する|local llmは正常完了・本文+94.9%・入力-26.2%。DuckDBは入力-1.6%だが本文-36.3%、段落-33.3%、Knowledge 4→3。13 fetch中12件を `new_question` と自己評価し重複判定が機能せず|不採用|候補 `c282f6f`、結果 `a9fbdfb`、revert `01606c6`、保存ブランチ `codex/experiment-search-url-u1-20260917`、詳細 `experiments/SEARCH-URL-SELECTION-U1-20260917.md`|
 
 ## 主なlive実行ID
 
