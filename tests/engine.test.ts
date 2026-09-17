@@ -48,6 +48,38 @@ test("mock research persists traceable artifact and static export", async () => 
 		s.close();
 	}
 });
+test("engine forwards explicit repository identity to knowledge lookup", async () => {
+	const s = setup();
+	try {
+		const job = s.store.create(
+			createJobSchema.parse({ engineVersion: 1, topic: "repository scoped" }),
+		);
+		job.config.repositoryIdentity = {
+			projectRef: "project-1",
+			repoKey: "deepstill",
+			repoPath: "/workspace/deepStill",
+		};
+		s.store.saveJob(job);
+		let repository: unknown;
+		const engine = new Engine(
+			s.store,
+			() => ({
+				...mocks,
+				knowledge: {
+					async lookup(_query, _signal, context) {
+						repository = context?.repository;
+						return { state: "explore" as const, ids: [], reason: "none" };
+					},
+				},
+			}),
+			s.dir,
+		);
+		await engine.tick(job.id);
+		expect(repository).toEqual(job.config.repositoryIdentity);
+	} finally {
+		s.close();
+	}
+});
 test("atomic lease acquisition and expired owner cannot commit", () => {
 	const s = setup();
 	const second = new Store(s.store.path);

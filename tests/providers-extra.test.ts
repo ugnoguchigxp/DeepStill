@@ -4,6 +4,7 @@ import { CompatibleLlm } from "../packages/llm-provider";
 import {
 	ContextStillMcp,
 	emptyKnowledge,
+	type RepositoryIdentity,
 } from "../packages/integrations/contextstill";
 import { transcodeLegacyHtml } from "../packages/crawler/encoding";
 import { parseScope } from "../packages/research/scope";
@@ -127,6 +128,7 @@ test("ContextStill maps knowledge hits, exact titles, degradation and abort", as
 	const items = (
 		payload: unknown,
 		init?: { error?: boolean; status?: number },
+		repository?: RepositoryIdentity,
 	) =>
 		new ContextStillMcp(
 			"http://localhost/mcp",
@@ -160,6 +162,7 @@ test("ContextStill maps knowledge hits, exact titles, degradation and abort", as
 					},
 				});
 			}),
+			{ repository },
 		);
 	expect(
 		(
@@ -186,6 +189,33 @@ test("ContextStill maps knowledge hits, exact titles, degradation and abort", as
 			}).lookup("Topic", signal)
 		).state,
 	).toBe("unavailable");
+	expect(
+		(
+			await items(
+				{
+					items: [{ id: "1", title: "Topic", body: "body" }],
+				},
+				undefined,
+				{ repoPath: "/workspace/deepStill" },
+			).lookup("Topic", signal)
+		).state,
+	).toBe("unavailable");
+	expect(
+		(
+			await items(
+				{
+					items: [{ id: "1", title: "Topic", body: "body" }],
+					diagnostics: {
+						scopedSearch: true,
+						repoScopeFallbackUsed: false,
+						missingIdentityGlobalOnly: false,
+					},
+				},
+				undefined,
+				{ repoPath: "/workspace/deepStill" },
+			).lookup("Topic", signal)
+		).state,
+	).toBe("verify");
 	expect((await items({}, { error: true }).lookup("Topic", signal)).state).toBe(
 		"unavailable",
 	);

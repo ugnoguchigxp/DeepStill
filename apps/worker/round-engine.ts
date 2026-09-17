@@ -32,6 +32,7 @@ import {
 	type ActionCandidate,
 } from "../../packages/research/direction";
 import { sourceIndex, readSourceRange } from "../../packages/memory/source";
+import { repositoryIdentityFromConfig } from "../../packages/repository-identity";
 import { fits, evaluationHold } from "../../packages/research/budget";
 import {
 	memoryContext,
@@ -1418,7 +1419,10 @@ export class RoundEngine {
 					t,
 					`round:${w.id}:knowledge`,
 					{ requests: 1 },
-					() => this.providers.knowledge.lookup(job.topic, signal),
+					() =>
+						this.providers.knowledge.lookup(job.topic, signal, {
+							repository: repositoryIdentityFromConfig(job.config),
+						}),
 				);
 				this.complete(t, w, result, () => {
 					const current = this.store.getJob(job.id) as Job;

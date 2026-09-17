@@ -8,11 +8,14 @@ import { liveCrawler } from "../../packages/crawler";
 import { CodexLlm } from "../../packages/llm-provider/codex";
 import { CodexSearch } from "../../packages/search-provider/codex";
 import { CompatibleLlm } from "../../packages/llm-provider";
-import {
-	ContextStillMcp,
-	emptyKnowledge,
-} from "../../packages/integrations/contextstill";
+import { ContextStillMcp } from "../../packages/integrations/contextstill";
+import { emptyKnowledge } from "../../packages/knowledge-provider";
 export function configuredProviders(job?: Job): Providers {
+	const contextStillRepository = {
+		projectRef: process.env.CONTEXTSTILL_PROJECT_REF,
+		repoKey: process.env.CONTEXTSTILL_REPO_KEY,
+		repoPath: process.env.CONTEXTSTILL_REPO_PATH,
+	};
 	return {
 		search:
 			job?.config.searchProvider === "direct"
@@ -52,6 +55,12 @@ export function configuredProviders(job?: Job): Providers {
 			? new ContextStillMcp(
 					process.env.CONTEXTSTILL_MCP_URL,
 					process.env.CONTEXTSTILL_API_KEY,
+					fetch,
+					{
+						repository: Object.values(contextStillRepository).some(Boolean)
+							? contextStillRepository
+							: undefined,
+					},
 				)
 			: emptyKnowledge,
 	};

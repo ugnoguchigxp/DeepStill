@@ -55,7 +55,7 @@ import {
 import {
 	emptyKnowledge,
 	type KnowledgeProvider,
-} from "../../packages/integrations/contextstill";
+} from "../../packages/knowledge-provider";
 import {
 	fixtureLlm,
 	type LlmProvider,
@@ -66,6 +66,7 @@ import {
 	researchBrief,
 	type ScopeItem,
 } from "../../packages/research/scope";
+import { repositoryIdentityFromConfig } from "../../packages/repository-identity";
 import {
 	fixtureSearch,
 	type SearchProvider,
@@ -436,7 +437,9 @@ export class Engine {
 		try {
 			const p = this.providers(job);
 			if (state.phase === "seed") {
-				const knowledge = await p.knowledge.lookup(job.topic, signal);
+				const knowledge = await p.knowledge.lookup(job.topic, signal, {
+					repository: repositoryIdentityFromConfig(job.config),
+				});
 				next({ phase: "suggest" }, () => {
 					const current = this.store.getJob(job.id);
 					if (!current) throw new Error("JOB_MISSING");
@@ -515,7 +518,9 @@ export class Engine {
 					q.query = decision.query;
 					q.reason = `${decision.status}: ${decision.reason}; question=${decision.question}`;
 				}
-				const knowledge = await p.knowledge.lookup(q.query, signal);
+				const knowledge = await p.knowledge.lookup(q.query, signal, {
+					repository: repositoryIdentityFromConfig(job.config),
+				});
 				next(
 					{
 						phase: knowledge.state === "known" ? "choose" : "submit",

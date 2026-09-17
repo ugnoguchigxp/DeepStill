@@ -1,9 +1,10 @@
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 import { DataForSeo } from "../packages/search-provider";
 import { CompatibleLlm } from "../packages/llm-provider";
 import { ContextStillMcp } from "../packages/integrations/contextstill";
 import { createApp } from "../apps/api/app";
 import { Store } from "../packages/db";
+import { configuredProviders } from "../apps/worker/main";
 const signal = new AbortController().signal;
 function fake(
 	fn: (url: string, init?: RequestInit) => Response | Promise<Response>,
@@ -87,6 +88,7 @@ test("LLM sends bounded output and preserves unavailable usage", async () => {
 });
 test("ContextStill only calls read-only search and reports disconnection failures", async () => {
 	let method = "";
+	let arguments_: Record<string, unknown> = {};
 	const p = new ContextStillMcp(
 		"http://localhost/mcp",
 		"",
@@ -106,21 +108,60 @@ test("ContextStill only calls read-only search and reports disconnection failure
 				return new Response(null, { status: 202 });
 			if (!req.method) return new Response(null, { status: 405 });
 			method = req.params.name;
+			arguments_ = req.params.arguments;
 			return Response.json({
 				jsonrpc: "2.0",
 				id: req.id,
-				result: { content: [{ type: "text", text: "no content" }] },
+				result: {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								items: [],
+								diagnostics: {
+									scopedSearch: true,
+									repoScopeFallbackUsed: false,
+									missingIdentityGlobalOnly: false,
+								},
+							}),
+						},
+					],
+				},
 			});
 		}),
+		{
+			repository: {
+				projectRef: "project-1",
+				repoKey: "deepstill",
+				repoPath: "/workspace/deepStill",
+			},
+		},
 	);
 	expect((await p.lookup("q", signal)).state).toBe("explore");
 	expect(method).toBe("search_knowledge");
+	expect(arguments_).toMatchObject({
+		query: "q",
+		projectRef: "project-1",
+		repoKey: "deepstill",
+		repoPath: "/workspace/deepStill",
+	});
 	const bad = new ContextStillMcp(
 		"http://localhost/mcp",
 		"",
 		fake(() => new Response("", { status: 500 })),
 	);
 	expect((await bad.lookup("q", signal)).state).toBe("unavailable");
+});
+test("worker accepts ContextStill without optional repository defaults", () => {
+	vi.stubEnv("CONTEXTSTILL_MCP_URL", "http://localhost/mcp");
+	vi.stubEnv("CONTEXTSTILL_PROJECT_REF", "");
+	vi.stubEnv("CONTEXTSTILL_REPO_KEY", "");
+	vi.stubEnv("CONTEXTSTILL_REPO_PATH", "");
+	try {
+		expect(() => configuredProviders()).not.toThrow();
+	} finally {
+		vi.unstubAllEnvs();
+	}
 });
 test("API validates budget and rejects remote origins", async () => {
 	const s = new Store(":memory:");

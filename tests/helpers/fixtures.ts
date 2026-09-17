@@ -243,7 +243,15 @@ export function makeMemory(over: Partial<MemoryBundle> = {}): MemoryBundle {
 		jobId: makeJob().id,
 		topic: "LLMとWeb探索",
 		supersedes: null,
-		events: [],
+		events: [
+			{
+				id: 1,
+				jobId: makeJob().id,
+				type: "job.started",
+				data: {},
+				createdAt: makeJob().createdAt,
+			},
+		],
 		knowledge: [
 			{
 				id: "k:rule",
