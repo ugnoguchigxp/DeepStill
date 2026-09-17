@@ -205,8 +205,6 @@ export class Store {
 					extractor: "llm-fetch@0.1.1",
 					promptVersion: "5",
 					deliverySectionUpdates: process.env.DELIVERY_SECTION_UPDATES === "1",
-					deliveryCandidateSelection:
-						process.env.DELIVERY_CANDIDATE_SELECTION === "1",
 					memoryVersion: process.env.MEMORY_FIRST_ENABLED === "0" ? 0 : 1,
 					researchControlVersion:
 						process.env.MEMORY_FIRST_ENABLED === "0" ? 1 : 2,

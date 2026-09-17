@@ -95,46 +95,6 @@ export const deliverableStepSchema = z.object({
 	draft: draftSchema.nullable(),
 	next: actionSchema,
 });
-export const candidateFetchSchema = z.object({
-	kind: z.literal("fetch"),
-	candidateId: text,
-	purpose: text.max(400),
-	expectedCoverage: z
-		.array(
-			z.enum([
-				"definition",
-				"mechanism",
-				"example",
-				"conditions",
-				"comparison",
-				"counterevidence",
-			]),
-		)
-		.min(1)
-		.max(6),
-	sourceRole: z.enum([
-		"official_or_primary",
-		"independent_secondary",
-		"navigation_or_index",
-		"unknown",
-	]),
-	novelty: z.enum([
-		"new_question",
-		"continuation",
-		"likely_redundant",
-		"unknown",
-	]),
-});
-export const candidateActionSchema = z.union([
-	actionSchema.options[0],
-	candidateFetchSchema,
-	actionSchema.options[2],
-	actionSchema.options[3],
-]);
-export const candidateDeliverableStepSchema = z.object({
-	draft: draftSchema.nullable(),
-	next: candidateActionSchema,
-});
 export const sectionUpdateSchema = z.object({
 	sections: z
 		.array(
@@ -165,10 +125,6 @@ export const sectionUpdateSchema = z.object({
 export const deliverableSectionStepSchema = z.object({
 	update: sectionUpdateSchema,
 	next: actionSchema,
-});
-export const candidateDeliverableSectionStepSchema = z.object({
-	update: sectionUpdateSchema,
-	next: candidateActionSchema,
 });
 export const deliverableEpisodeSchema = episodeSchema.omit({
 	id: true,

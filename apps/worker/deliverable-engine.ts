@@ -16,8 +16,6 @@ import { emptyBundle, memoryCandidates } from "../../packages/memory";
 import type { MemoryBundle } from "../../packages/memory/schema";
 import {
 	applySectionUpdate,
-	candidateDeliverableSectionStepSchema,
-	candidateDeliverableStepSchema,
 	type Draft,
 	deliverableEpisodeSchema,
 	deliverableSectionStepSchema,
@@ -28,7 +26,6 @@ import {
 	skillMarkdown,
 	skillName,
 	sourceLines,
-	stableId,
 } from "../../packages/research/deliverables";
 function must<T>(value: T | null | undefined): T {
 	if (value == null) throw Error("JOB_MISSING");
@@ -88,72 +85,6 @@ const blank = (): Draft => ({
 	limitations: [],
 	openQuestions: [],
 });
-type FetchCandidate = {
-	id: string;
-	url: string;
-	title: string;
-	snippet: string;
-	origin: "search" | "source_link";
-	query?: string;
-	parentSourceId?: string;
-	parentTitle?: string;
-	depth: number;
-	sameHostReadSources: number;
-};
-function urlHost(url: string) {
-	try {
-		return new URL(url).hostname.toLowerCase();
-	} catch {
-		return "";
-	}
-}
-function fetchCandidates(
-	state: Flow,
-	sources: Snapshot[],
-	depthLimit: number,
-): FetchCandidate[] {
-	const candidates = new Map<string, FetchCandidate>();
-	const add = (
-		candidate: Omit<FetchCandidate, "id" | "sameHostReadSources">,
-	) => {
-		const url = canonicalUrl(candidate.url);
-		if (state.attempted.includes(url) || candidate.depth > depthLimit) return;
-		const host = urlHost(url);
-		candidates.set(url, {
-			...candidate,
-			id: `url:${stableId(url)}`,
-			url,
-			sameHostReadSources: sources.filter(
-				(source) => urlHost(source.finalUrl) === host,
-			).length,
-		});
-	};
-	for (const queued of state.queue)
-		add({
-			url: queued.url,
-			title: queued.title,
-			snippet: queued.snippet ?? queued.purpose,
-			origin: queued.parent ? "source_link" : "search",
-			query: queued.query,
-			parentSourceId: queued.parent,
-			parentTitle: queued.parent
-				? sources.find((source) => source.id === queued.parent)?.title
-				: undefined,
-			depth: queued.depth,
-		});
-	for (const source of sources)
-		for (const link of source.links ?? [])
-			add({
-				url: link.url,
-				title: link.text || link.url,
-				snippet: link.context,
-				origin: "source_link",
-				parentSourceId: source.id,
-				parentTitle: source.title,
-				depth: (state.depths[canonicalUrl(source.finalUrl)] ?? 0) + 1,
-			});
-	return [...candidates.values()].slice(-80);
-}
 export class DeliverableEngine {
 	constructor(
 		private host: Engine,
@@ -571,11 +502,6 @@ export class DeliverableEngine {
 			if (state.phase === "write") {
 				const content = state.content;
 				const sources = this.store.all<Snapshot>(job.id, "source");
-				const candidateSelection =
-					job.config.deliveryCandidateSelection === true;
-				const availableFetchCandidates = candidateSelection
-					? fetchCandidates(state, sources, job.budget.depth)
-					: [];
 				const recoveryExhausted = state.failures >= 8;
 				// A retrieval stop adds no evidence. Preserve the last validated draft;
 				// asking the writer to finalize here can silently discard explanations.
@@ -606,7 +532,6 @@ export class DeliverableEngine {
 				const input = JSON.stringify({
 					navigationOnly,
 					sectionUpdate,
-					candidateSelection,
 					originalRequest: job.topic,
 					readableSourceIds: sources
 						.filter((s) => (state.cursors[s.id] ?? 0) < s.text.length)
@@ -651,34 +576,26 @@ export class DeliverableEngine {
 						readingNotice: pdfReadNotice(s.pdf),
 						readable: (state.cursors[s.id] ?? 0) < s.text.length,
 						headings: s.id === content?.sourceId ? (s.headings ?? []) : [],
-						links: candidateSelection
-							? []
-							: (s.links ?? [])
-									.filter(
-										(l) =>
-											!state.attempted.includes(l.url) &&
-											(state.depths[canonicalUrl(s.finalUrl)] ?? 0) + 1 <=
-												job.budget.depth,
-									)
-									.slice(0, s.id === content?.sourceId ? 400 : 5)
-									.map((l, index) =>
-										index < 30
-											? { ...l, context: l.context.slice(0, 240) }
-											: { url: l.url, text: l.text, kind: l.kind },
-									),
+						links: (s.links ?? [])
+							.filter(
+								(l) =>
+									!state.attempted.includes(l.url) &&
+									(state.depths[canonicalUrl(s.finalUrl)] ?? 0) + 1 <=
+										job.budget.depth,
+							)
+							.slice(0, s.id === content?.sourceId ? 400 : 5)
+							.map((l, index) =>
+								index < 30
+									? { ...l, context: l.context.slice(0, 240) }
+									: { url: l.url, text: l.text, kind: l.kind },
+							),
 					})),
-					discoveries: candidateSelection
-						? []
-						: state.queue
-								.filter(
-									(q) =>
-										!state.attempted.includes(q.url) &&
-										q.depth <= job.budget.depth,
-								)
-								.slice(-40),
-					fetchCandidates: candidateSelection
-						? availableFetchCandidates
-						: undefined,
+					discoveries: state.queue
+						.filter(
+							(q) =>
+								!state.attempted.includes(q.url) && q.depth <= job.budget.depth,
+						)
+						.slice(-40),
 					recentActions: state.history.slice(-5),
 					lastSearch: state.lastSearch ?? null,
 					retrievalFailures: (state.failuresDetail ?? []).slice(-8),
@@ -751,46 +668,15 @@ export class DeliverableEngine {
 				state.sequence++;
 				try {
 					const raw = JSON.parse(r.text);
-					const parsedCandidate = sectionUpdate
+					const parsed = sectionUpdate
 						? (() => {
-								const value = candidateSelection
-									? candidateDeliverableSectionStepSchema.parse(raw)
-									: deliverableSectionStepSchema.parse(raw);
+								const value = deliverableSectionStepSchema.parse(raw);
 								return {
 									draft: applySectionUpdate(state.draft, value.update),
 									next: value.next,
 								};
 							})()
-						: candidateSelection
-							? candidateDeliverableStepSchema.parse(raw)
-							: deliverableStepSchema.parse(raw);
-					const candidateFetch =
-						parsedCandidate.next.kind === "fetch" &&
-						"candidateId" in parsedCandidate.next
-							? parsedCandidate.next
-							: undefined;
-					const selectionRationale = candidateFetch
-						? {
-								expectedCoverage: candidateFetch.expectedCoverage,
-								sourceRole: candidateFetch.sourceRole,
-								novelty: candidateFetch.novelty,
-							}
-						: undefined;
-					const normalizedNext: ResearchAction = candidateFetch
-						? {
-								kind: "fetch",
-								url: must(
-									availableFetchCandidates.find(
-										(candidate) => candidate.id === candidateFetch.candidateId,
-									),
-								).url,
-								purpose: candidateFetch.purpose,
-							}
-						: (parsedCandidate.next as ResearchAction);
-					const parsed: { draft: Draft | null; next: ResearchAction } = {
-						...parsedCandidate,
-						next: normalizedNext,
-					};
+						: deliverableStepSchema.parse(raw);
 					if (content && parsed.draft === null)
 						throw Error("READ_CONTENT_REQUIRES_DRAFT_UPDATE");
 					const output = { ...parsed, draft: parsed.draft ?? state.draft };
@@ -936,7 +822,6 @@ export class DeliverableEngine {
 								: state.history.at(-1)?.action === "search"
 									? "search_results"
 									: "retrieval_failed",
-							selection: selectionRationale ?? null,
 						});
 						if (unchanged) return;
 						for (const c of result.claims)

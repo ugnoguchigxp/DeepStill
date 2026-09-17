@@ -1,6 +1,4 @@
 import {
-	candidateDeliverableSectionStepSchema,
-	candidateDeliverableStepSchema,
 	deliverableSectionStepSchema,
 	deliverableStepSchema,
 	draftSchema,
@@ -55,23 +53,14 @@ export function strictSchema(schema: unknown): unknown {
 export function groundedSchema(kind: PromptKind, input: string) {
 	if (kind === "deliverable_step") {
 		const data = JSON.parse(input);
-		const candidateSelection = data.candidateSelection === true;
 		const schema = z.toJSONSchema(
 			data.sectionUpdate
-				? candidateSelection
-					? candidateDeliverableSectionStepSchema
-					: deliverableSectionStepSchema
+				? deliverableSectionStepSchema
 				: data.navigationOnly
-					? candidateSelection
-						? candidateDeliverableStepSchema.extend({ draft: z.null() })
-						: deliverableStepSchema.extend({ draft: z.null() })
+					? deliverableStepSchema.extend({ draft: z.null() })
 					: data.newContent
-						? candidateSelection
-							? candidateDeliverableStepSchema.extend({ draft: draftSchema })
-							: deliverableStepSchema.extend({ draft: draftSchema })
-						: candidateSelection
-							? candidateDeliverableStepSchema
-							: deliverableStepSchema,
+						? deliverableStepSchema.extend({ draft: draftSchema })
+						: deliverableStepSchema,
 		);
 		const citedSourceIds = (data.sources ?? [])
 			.filter((source: { readUntil: number }) => source.readUntil > 0)
@@ -112,27 +101,6 @@ export function groundedSchema(kind: PromptKind, input: string) {
 				};
 				return true;
 			});
-			if (candidateSelection) {
-				const candidateIds = (data.fetchCandidates ?? []).map(
-					(candidate: { id: string }) => candidate.id,
-				);
-				nextSchema.anyOf = nextSchema.anyOf.filter((choice) => {
-					if (typeof choice !== "object") return true;
-					const actionKind = choice.properties?.kind;
-					if (
-						typeof actionKind !== "object" ||
-						actionKind.const !== "fetch" ||
-						!choice.properties
-					)
-						return true;
-					if (!candidateIds.length) return false;
-					choice.properties.candidateId = {
-						type: "string",
-						enum: candidateIds,
-					};
-					return true;
-				});
-			}
 		}
 		return schema;
 	}
