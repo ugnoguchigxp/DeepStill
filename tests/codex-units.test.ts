@@ -358,3 +358,25 @@ test("P03 navigation-only schema still permits only a null draft", () => {
 	expect(schema.properties.draft.type).toBe("null");
 	expect(JSON.stringify(schema)).not.toContain("worldModelDiscovery");
 });
+
+test("enabled discovery system context states empty-definition and correlation lock rules", () => {
+	const reading = prompt(
+		"deliverable_step",
+		JSON.stringify({
+			worldModelDiscoveryEnabled: true,
+			newContent: { sourceId: "src-1", lines: [] },
+		}),
+	).system;
+	expect(reading).toContain("candidates=[]");
+	expect(reading).toContain("correlates_with");
+	expect(reading).toContain("cannot be assessment=supported");
+	const navigation = prompt(
+		"deliverable_step",
+		JSON.stringify({
+			worldModelDiscoveryEnabled: true,
+			navigationOnly: true,
+		}),
+	).system;
+	expect(navigation).toContain("required discovery gap");
+	expect(navigation).not.toContain("candidates=[]");
+});
