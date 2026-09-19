@@ -127,6 +127,34 @@ describe("research adapter boundaries", () => {
 		).toThrow("INVALID_CANDIDATE_CLAIM_REFERENCE");
 	});
 
+	test("X02 projection keeps the existing capabilities and omits discovery fields", () => {
+		const capabilities = buildDeepStillCapabilities(["submit", "status"]);
+		expect(capabilities.outputKinds).toEqual([
+			"report",
+			"claims",
+			"evidence",
+			"knowledge_candidates",
+			"episode_source",
+		]);
+		const projected = projectResearchResult(
+			makeDetail({
+				artifacts: [
+					makeArtifact({
+						worldModelDiscovery: {
+							schemaVersion: 1,
+							basedOnArtifactVersion: 1,
+							changeReason: "内部候補",
+							candidates: [],
+							gaps: [],
+						},
+					}),
+				],
+			}),
+		);
+		expect(JSON.stringify(projected)).not.toContain("worldModelDiscovery");
+		expect(JSON.stringify(projected)).not.toContain("内部候補");
+	});
+
 	test("capabilities report only the implemented web boundary", () => {
 		const capabilities = buildDeepStillCapabilities();
 		expect(capabilities.operations).toEqual([]);

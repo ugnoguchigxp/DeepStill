@@ -46,7 +46,8 @@ UIから探索経路・採否理由・知見・引用元・実行イベントを
 
 - DB: `data/deepstill.sqlite`
 - 静的レポート: `data/artifacts/<jobId>/1/report.html`
-- 根拠データ: 同じディレクトリの `evidence.json`
+- 根拠データ: 同じディレクトリの `evidence.json`。ワールドモデル発見の候補と引用もここに含まれる
+- ワールドモデル発見: 調査詳細の「ワールドモデル発見」タブ。ワールドモデルへの登録は行わない。静的な report.html / report.md には専用節を置かない
 - 品質指標: `GET /api/jobs/<jobId>/metrics`。採否未確定の指標はnull。
 - ローカル採否記録: `POST /api/jobs/<jobId>/candidates/<candidateId>/decision` に `{"adoption":"accepted"}` / `rejected` / `pending` を送信。ContextStillへの登録は行いません。
 - ContextStill向け候補: `GET /api/jobs/<jobId>/candidates`。採用の自動登録はしません。

@@ -1,6 +1,8 @@
 import {
 	deliverableInstructions,
 	navigationInstructions,
+	worldModelDiscoveryInstructions,
+	worldModelDiscoveryNavigationInstructions,
 } from "../research/deliverable-prompts";
 import { evidenceContract } from "./contracts";
 export { evidenceContract } from "./contracts";
@@ -76,10 +78,17 @@ export function prompt(key: PromptKind, source: string) {
 	const compiled = catalog.bind({ instructionLocale: "en-US" })(key, {
 		source,
 	});
-	const system =
-		key === "deliverable_step" && JSON.parse(source).navigationOnly
+	const payload =
+		key === "deliverable_step"
+			? (JSON.parse(source) as Record<string, unknown>)
+			: null;
+	const discoveryEnabled = payload?.worldModelDiscoveryEnabled === true;
+	let system =
+		key === "deliverable_step" && payload?.navigationOnly
 			? `${evidenceContract}\n${navigationInstructions}`
 			: systemInstructions(key);
+	if (key === "deliverable_step" && discoveryEnabled)
+		system = `${system}\n${payload?.navigationOnly ? worldModelDiscoveryNavigationInstructions : worldModelDiscoveryInstructions}`;
 	return {
 		...compiled,
 		system,

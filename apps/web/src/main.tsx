@@ -5,6 +5,7 @@ import {
 } from "../../../packages/core/pdf";
 import { ResearchEvent } from "./research-event";
 import { DeliverableMemory } from "./deliverable-memory";
+import { WorldModelDiscovery } from "./world-model-discovery";
 import {
 	QueryClient,
 	QueryClientProvider,
@@ -588,6 +589,7 @@ export function App() {
 									? [
 											["artifact", "レポート"],
 											["memory", "Knowledge・Episode"],
+											["world-model", "ワールドモデル発見"],
 											["activity", "実行履歴"],
 										]
 									: [
@@ -595,6 +597,7 @@ export function App() {
 											["frontier", "探索経路"],
 											["findings", "知見と根拠"],
 											["memory", "Knowledge・Episode"],
+											["world-model", "ワールドモデル発見"],
 											["activity", "実行履歴"],
 										]
 								).map(([id, label]) => (
@@ -614,6 +617,9 @@ export function App() {
 								{tab === "memory" &&
 									j.config.researchFlow === "deliverables-v1" &&
 									d && <DeliverableMemory detail={d} />}
+								{tab === "world-model" && d && (
+									<WorldModelDiscovery detail={d} />
+								)}
 								{tab === "memory" &&
 									j.config.researchFlow !== "deliverables-v1" &&
 									(d?.memory?.length ? (

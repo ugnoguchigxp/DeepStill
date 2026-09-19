@@ -1,5 +1,7 @@
 # DeepStill v0.1 実装記録
 
+2026-09-20追記: [ワールドモデル発見タブ](world-model-discovery-plan.md) のV0（WM-01〜07）を実装した。新規 deliverables-v1 Job は本文読解時に関係候補を生成し、調査詳細タブと `evidence.json` から参照できる。専用LLM呼出し、World Model登録、既存調査の再生成は含まない。実装・回帰は確認済み。同一テーマでの実モデル品質比較は未実施であり、fixture成功を実調査品質の合格と読み替えない。
+
 2026-09-12追記: [Memory先行生成v1](memory-first-implementation.md)を実装。Knowledge・Episode・概念をレポートより先に生成する。再利用品質90点超は未達で、実装範囲と残る検証は同文書に記載した。
 
 2026-09-12追記: 新規調査の逐次キューとラウンド評価を実装した。[ラウンド探索v2の実装記録](round-research-implementation.md)を参照。以下のv0.1記録は当時の実装を保持する。

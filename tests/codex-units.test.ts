@@ -40,6 +40,7 @@ import {
 	strictSchema,
 } from "../packages/llm-provider/codex";
 import { inspectCodex } from "../packages/llm-provider/runtime";
+import { prompt } from "../packages/prompts";
 
 const signal = new AbortController().signal;
 
@@ -294,4 +295,66 @@ test("draft citations reject truncated and unread IDs while retaining completed 
 	const reread = structuredClone(output);
 	reread.next.sourceId = oldId;
 	expect(validate.safeParse(reread).success).toBe(false);
+});
+
+test("P01 disabled discovery keeps the previous deliverable schema and system hash", () => {
+	const off = JSON.stringify(
+		groundedSchema("deliverable_step", JSON.stringify({ newContent: {} })),
+	);
+	const missing = JSON.stringify(
+		groundedSchema("deliverable_step", JSON.stringify({ newContent: {} })),
+	);
+	expect(off).toBe(missing);
+	expect(off).not.toContain("worldModelDiscovery");
+	expect(
+		prompt("deliverable_step", JSON.stringify({ newContent: {} })).manifest
+			.systemHash,
+	).toBe(
+		prompt(
+			"deliverable_step",
+			JSON.stringify({ newContent: {}, worldModelDiscoveryEnabled: false }),
+		).manifest.systemHash,
+	);
+});
+
+test("P02 enabled reading schemas require nullable discovery and bind citation source IDs", () => {
+	const schema = groundedSchema(
+		"deliverable_step",
+		JSON.stringify({
+			worldModelDiscoveryEnabled: true,
+			newContent: { sourceId: "src-1", lines: [] },
+			sources: [{ id: "src-1", readUntil: 10, length: 10 }],
+		}),
+	) as unknown as {
+		properties: { draft: { properties: Record<string, unknown> } };
+	};
+	const encoded = JSON.stringify(schema);
+	expect(schema.properties.draft.properties.worldModelDiscovery).toBeTruthy();
+	expect(encoded).toContain("correlates_with");
+	expect(encoded).toContain('"enum":["src-1"]');
+	expect(JSON.stringify(schema.properties.draft.properties.worldModelDiscovery)).toContain(
+		'"enum":["src-1"]',
+	);
+	const update = groundedSchema(
+		"deliverable_step",
+		JSON.stringify({
+			worldModelDiscoveryEnabled: true,
+			sectionUpdate: true,
+			newContent: { sourceId: "src-1", lines: [] },
+			sources: [{ id: "src-1", readUntil: 10, length: 10 }],
+		}),
+	);
+	expect(JSON.stringify(update)).toContain("worldModelDiscovery");
+});
+
+test("P03 navigation-only schema still permits only a null draft", () => {
+	const schema = groundedSchema(
+		"deliverable_step",
+		JSON.stringify({
+			worldModelDiscoveryEnabled: true,
+			navigationOnly: true,
+		}),
+	) as unknown as { properties: { draft: { type: string } } };
+	expect(schema.properties.draft.type).toBe("null");
+	expect(JSON.stringify(schema)).not.toContain("worldModelDiscovery");
 });

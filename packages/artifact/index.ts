@@ -17,6 +17,10 @@ import {
 	reportResponse,
 } from "../contracts";
 import { hash } from "../crawler";
+import {
+	assertStoredDiscoverySemantics,
+	worldModelDiscoverySchema,
+} from "../research/world-model-schema";
 import { narrativeHtml, narrativeMarkdown } from "./narrative";
 export function validateClaims(detail: JobDetail, claimIds: string[]) {
 	for (const id of claimIds) {
@@ -59,6 +63,34 @@ export function validateArtifact(detail: JobDetail, artifact: Artifact) {
 		)
 			throw new Error("INVALID_REPORT_REFERENCE");
 	}
+	validateWorldModelDiscovery(detail, artifact);
+}
+export function validateWorldModelDiscovery(
+	detail: JobDetail,
+	artifact: Artifact,
+) {
+	if (!artifact.worldModelDiscovery) return;
+	const discovery = worldModelDiscoverySchema.parse(
+		artifact.worldModelDiscovery,
+	);
+	assertStoredDiscoverySemantics(discovery);
+	if (discovery.basedOnArtifactVersion !== artifact.version)
+		throw new Error("INVALID_DISCOVERY_ARTIFACT_VERSION");
+	for (const candidate of discovery.candidates)
+		for (const item of candidate.evidence)
+			for (const id of item.evidenceIds) {
+				const evidence = detail.evidence.find((entry) => entry.id === id);
+				const source = detail.sources.find(
+					(entry) => entry.id === evidence?.snapshotId,
+				);
+				if (
+					!evidence ||
+					!source ||
+					source.text.slice(evidence.start, evidence.end) !== evidence.quote ||
+					hash(source.text) !== source.hash
+				)
+					throw new Error("INVALID_DISCOVERY_EVIDENCE_REFERENCE");
+			}
 }
 export function reportBody(claims: Claim[], fixture: boolean) {
 	return `${fixture ? "検証用fixtureです。実際のWeb調査結果ではありません。\n\n" : ""}${claims.map((c) => `${c.text} [${c.id}]`).join("\n\n")}`;

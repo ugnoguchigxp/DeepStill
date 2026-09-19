@@ -2,8 +2,10 @@ import {
 	deliverableSectionStepSchema,
 	deliverableStepSchema,
 	draftSchema,
+	sectionUpdateSchema,
 	deliverableEpisodeSchema,
 } from "../research/deliverables";
+import { discoveryInputSchema } from "../research/world-model-schema";
 import { fulfillmentSchema } from "../research/fulfillment";
 import { retrievalStepSchema } from "../memory/retrieval";
 import {
@@ -53,14 +55,24 @@ export function strictSchema(schema: unknown): unknown {
 export function groundedSchema(kind: PromptKind, input: string) {
 	if (kind === "deliverable_step") {
 		const data = JSON.parse(input);
+		const enabled = data.worldModelDiscoveryEnabled === true;
+		const discoveryField = discoveryInputSchema.nullable();
+		const draftForSchema = enabled
+			? draftSchema.extend({ worldModelDiscovery: discoveryField })
+			: draftSchema.omit({ worldModelDiscovery: true });
+		const updateForSchema = enabled
+			? sectionUpdateSchema.extend({ worldModelDiscovery: discoveryField })
+			: sectionUpdateSchema.omit({ worldModelDiscovery: true });
 		const schema = z.toJSONSchema(
 			data.sectionUpdate
-				? deliverableSectionStepSchema
+				? deliverableSectionStepSchema.extend({ update: updateForSchema })
 				: data.navigationOnly
 					? deliverableStepSchema.extend({ draft: z.null() })
-					: data.newContent
-						? deliverableStepSchema.extend({ draft: draftSchema })
-						: deliverableStepSchema,
+					: data.newContent || data.finalizing
+						? deliverableStepSchema.extend({ draft: draftForSchema })
+						: deliverableStepSchema.extend({
+								draft: draftForSchema.nullable(),
+							}),
 		);
 		const citedSourceIds = (data.sources ?? [])
 			.filter((source: { readUntil: number }) => source.readUntil > 0)

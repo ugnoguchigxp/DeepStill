@@ -1,47 +1,14 @@
-import { locateEvidence } from "../core";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Artifact, Claim, Evidence, Snapshot } from "../contracts";
 import { episodeSchema, knowledgeSchema } from "../memory/schema";
+import { citationSchema, resolveCitations } from "./source-citations";
+import { materializeDiscovery, mergeDiscovery } from "./world-model-discovery";
+import { discoveryInputSchema } from "./world-model-schema";
+
+export { citationSchema, sourceLines } from "./source-citations";
 
 const text = z.string().trim().min(1);
-export const citationSchema = z.union([
-	z.object({
-		sourceId: text,
-		firstLine: z.number().int().positive(),
-		lastLine: z.number().int().positive(),
-	}),
-	z.object({ sourceId: text, quote: text.max(4000) }),
-]);
-export function sourceLines(text: string) {
-	const result: { number: number; start: number; end: number; text: string }[] =
-		[];
-	let start = 0,
-		end = 0,
-		bytes = 0;
-	for (const char of text) {
-		end += char.length;
-		bytes += Buffer.byteLength(char);
-		if (char === "\n" || bytes >= 1200) {
-			result.push({
-				number: result.length + 1,
-				start,
-				end,
-				text: text.slice(start, end),
-			});
-			start = end;
-			bytes = 0;
-		}
-	}
-	if (end > start)
-		result.push({
-			number: result.length + 1,
-			start,
-			end,
-			text: text.slice(start, end),
-		});
-	return result;
-}
 const citations = z.array(citationSchema).min(1).max(12);
 export const deliverableSection = z.object({
 	title: text.max(200),
@@ -76,6 +43,7 @@ export const draftSchema = z.object({
 	knowledge: z.array(deliverableKnowledge).max(8),
 	limitations: z.array(text.max(1200)).max(12),
 	openQuestions: z.array(text.max(600)).max(8),
+	worldModelDiscovery: discoveryInputSchema.nullable().optional(),
 });
 export const actionSchema = z.union([
 	z.object({ kind: z.literal("read"), sourceId: text, purpose: text.max(400) }),
@@ -121,6 +89,7 @@ export const sectionUpdateSchema = z.object({
 	knowledge: z.array(deliverableKnowledge).max(8),
 	limitations: z.array(text.max(1200)).max(12),
 	openQuestions: z.array(text.max(600)).max(8),
+	worldModelDiscovery: discoveryInputSchema.nullable().optional(),
 });
 export const deliverableSectionStepSchema = z.object({
 	update: sectionUpdateSchema,
@@ -190,12 +159,29 @@ export function applySectionUpdate(draft: Draft, update: SectionUpdate): Draft {
 		if (operation.operation === "delete") sections.splice(index, 1);
 		else sections[index] = { ...sections[index], section: operation.section };
 	}
-	return draftSchema.parse({
-		sections: sections.map((entry) => entry.section),
-		knowledge: update.knowledge,
-		limitations: update.limitations,
-		openQuestions: update.openQuestions,
-	});
+	const worldModelDiscovery = mergeDiscovery(
+		draft.worldModelDiscovery ?? undefined,
+		update.worldModelDiscovery,
+	);
+	return normalizeDraft(
+		draftSchema.parse({
+			sections: sections.map((entry) => entry.section),
+			knowledge: update.knowledge,
+			limitations: update.limitations,
+			openQuestions: update.openQuestions,
+			worldModelDiscovery,
+		}),
+	);
+}
+
+export function normalizeDraft(draft: Draft): Draft {
+	const worldModelDiscovery = mergeDiscovery(
+		undefined,
+		draft.worldModelDiscovery,
+	);
+	if (worldModelDiscovery) return { ...draft, worldModelDiscovery };
+	const { worldModelDiscovery: _omitted, ...rest } = draft;
+	return rest;
 }
 
 /** Citations are attached directly to user-visible paragraphs/knowledge; no LLM claim extraction. */
@@ -209,41 +195,9 @@ export function materialize(
 	const claims: Claim[] = [],
 		evidence: Evidence[] = [];
 	const refs = (body: string, cited: z.infer<typeof citations>) => {
-		const ids = cited.map((c) => {
-			const source = sources.find((s) => s.id === c.sourceId);
-			if (
-				!source ||
-				createHash("sha256").update(source.text).digest("hex") !== source.hash
-			)
-				throw Error("INVALID_SOURCE_REFERENCE");
-			let located: ReturnType<typeof locateEvidence>;
-			try {
-				if ("quote" in c) located = locateEvidence(source, c.quote);
-				else {
-					const lines = sourceLines(source.text),
-						first = lines[c.firstLine - 1],
-						last = lines[c.lastLine - 1];
-					if (!first || !last || last.end <= first.start)
-						throw Error("INVALID_LINE_REFERENCE");
-					located = {
-						start: first.start,
-						end: last.end,
-						quote: source.text.slice(first.start, last.end),
-						context: source.text.slice(
-							Math.max(0, first.start - 120),
-							last.end + 120,
-						),
-					};
-				}
-			} catch {
-				throw Error(
-					`QUOTE_NOT_IN_SNAPSHOT: ${source.id}: ${JSON.stringify(c).slice(0, 350)}. Copy a contiguous passage without ellipses.`,
-				);
-			}
-			const id = `e:${stableId(`${source.id}:${located.start}:${located.quote}`)}`;
-			if (!evidence.some((e) => e.id === id))
-				evidence.push({ id, snapshotId: source.id, ...located });
-			return id;
+		const ids = resolveCitations(cited, sources).map((item) => {
+			if (!evidence.some((entry) => entry.id === item.id)) evidence.push(item);
+			return item.id;
 		});
 		const id = `c:${stableId(JSON.stringify([body, ids]))}`;
 		if (!claims.some((c) => c.id === id))
@@ -306,6 +260,15 @@ export function materialize(
 		generatedAt: new Date().toISOString(),
 		fixture: false,
 	};
+	const discoveryResult = materializeDiscovery(
+		normalizeDraft(draft).worldModelDiscovery ?? undefined,
+		sources,
+		version,
+	);
+	for (const item of discoveryResult.evidence)
+		if (!evidence.some((entry) => entry.id === item.id)) evidence.push(item);
+	if (discoveryResult.discovery)
+		artifact.worldModelDiscovery = discoveryResult.discovery;
 	if (!sections.length) {
 		delete artifact.sections;
 		artifact.evidenceUnavailable = true;

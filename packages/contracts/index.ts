@@ -161,6 +161,7 @@ export interface Artifact {
 	sections?: ReportSection[];
 	limitations?: string[];
 	openQuestions?: string[];
+	worldModelDiscovery?: import("../research/world-model-schema").WorldModelDiscovery;
 	id: string;
 	version: number;
 	title: string;

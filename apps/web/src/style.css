@@ -400,6 +400,9 @@ main {
 }
 .tabs {
 	display: flex;
+	flex-wrap: wrap;
+	overflow-x: auto;
+	max-width: 100%;
 	border-bottom: 1px solid #dce5d7;
 	gap: 24px;
 }
@@ -827,6 +830,7 @@ td {
 .job-row:hover .job-link time,
 .job-row:focus-within .job-link time {
 	opacity: 0;
+	pointer-events: none;
 }
 .job-link:focus-visible {
 	outline: 2px solid #85ba83;
@@ -1139,5 +1143,130 @@ td {
 	}
 	.memory-field {
 		padding: 12px;
+	}
+}
+.world-model-panel {
+	display: grid;
+	gap: 16px;
+	min-width: 0;
+}
+.world-model-lead,
+.world-model-meta,
+.world-model-notice,
+.world-model-stale {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+.world-model-lead {
+	font-size: 13px;
+	line-height: 1.8;
+}
+.world-model-meta,
+.world-model-notice {
+	color: #617568;
+	font-size: 12px;
+}
+.world-model-stale,
+.world-model-caveat {
+	color: #825b24;
+	font-size: 12px;
+}
+.world-model-empty {
+	color: #6f7e73;
+	font-size: 13px;
+	overflow-wrap: anywhere;
+}
+.world-model-card-list,
+.world-model-gaps {
+	display: grid;
+	gap: 16px;
+	min-width: 0;
+}
+.world-model-card {
+	min-width: 0;
+	border: 1px solid #d9e3da;
+	border-radius: 12px;
+	background: #fff;
+	overflow-wrap: anywhere;
+}
+.world-model-card-header {
+	padding: 22px 24px 0;
+}
+.world-model-relation {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	font-size: 18px;
+	font-weight: 650;
+	margin: 0 0 8px;
+}
+.world-model-arrow {
+	color: #356344;
+}
+.world-model-card-content {
+	display: grid;
+	gap: 12px;
+	padding: 16px 24px 24px;
+}
+.world-model-field {
+	padding: 15px 16px;
+	background: #fafbf9;
+	border: 1px solid #e6ece5;
+	border-radius: 7px;
+	min-width: 0;
+}
+.world-model-field h5,
+.world-model-gaps h3 {
+	font-size: 12px;
+	font-weight: 650;
+	margin: 0 0 8px;
+	color: #365444;
+}
+.world-model-field p,
+.world-model-gaps p {
+	margin: 0;
+	white-space: pre-wrap;
+}
+.world-model-disclosure {
+	border: 1px solid #e0e7dd;
+	border-radius: 7px;
+}
+.world-model-disclosure summary {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 12px 16px;
+}
+.world-model-count {
+	padding: 2px 7px;
+	border-radius: 5px;
+	background: #edf2ec;
+	color: #526958;
+	font-size: 11px;
+}
+.world-model-disclosure-body {
+	padding: 16px;
+	border-top: 1px solid #e0e7dd;
+	display: grid;
+	gap: 12px;
+}
+.world-model-evidence blockquote {
+	margin: 12px 0 0;
+	padding-left: 14px;
+	border-left: 3px solid #b5cbb7;
+	white-space: pre-wrap;
+}
+.panel .world-model-gaps ul {
+	margin: 0;
+	padding-left: 1.2em;
+}
+@media (max-width: 680px) {
+	.world-model-card-header,
+	.world-model-card-content {
+		padding-left: 14px;
+		padding-right: 14px;
+	}
+	.world-model-relation {
+		font-size: 16px;
 	}
 }

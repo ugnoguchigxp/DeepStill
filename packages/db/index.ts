@@ -226,6 +226,7 @@ export class Store {
 					searchLanguageCode: process.env.DATAFORSEO_LANGUAGE_CODE || "ja",
 					saturationLowRounds: 2,
 					saturationMinimumRounds: 3,
+					...(useDelivery ? { worldModelDiscoveryVersion: 1 } : {}),
 				},
 			};
 			this.sql

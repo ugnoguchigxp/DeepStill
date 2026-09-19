@@ -22,11 +22,18 @@ import {
 	deliverableStepSchema,
 	draftSectionCatalog,
 	materialize,
+	normalizeDraft,
 	type ResearchAction,
 	skillMarkdown,
 	skillName,
 	sourceLines,
 } from "../../packages/research/deliverables";
+import {
+	discoveryNavigationContext,
+	mergeDiscovery,
+	requiredDiscoveryGaps,
+} from "../../packages/research/world-model-discovery";
+import type { DiscoveryInput } from "../../packages/research/world-model-schema";
 function must<T>(value: T | null | undefined): T {
 	if (value == null) throw Error("JOB_MISSING");
 	return value;
@@ -529,9 +536,12 @@ export class DeliverableEngine {
 					!!content &&
 					state.draft.sections.length > 0 &&
 					!navigationOnly;
+				const worldModelDiscoveryEnabled =
+					job.config.worldModelDiscoveryVersion === 1;
 				const input = JSON.stringify({
 					navigationOnly,
 					sectionUpdate,
+					worldModelDiscoveryEnabled,
 					originalRequest: job.topic,
 					readableSourceIds: sources
 						.filter((s) => (state.cursors[s.id] ?? 0) < s.text.length)
@@ -546,6 +556,15 @@ export class DeliverableEngine {
 					openQuestionsState: sectionUpdate
 						? state.draft.openQuestions
 						: undefined,
+					worldModelDiscoveryState: sectionUpdate
+						? state.draft.worldModelDiscovery
+						: undefined,
+					discoveryNavigation:
+						worldModelDiscoveryEnabled && navigationOnly
+							? discoveryNavigationContext(
+									state.draft.worldModelDiscovery ?? undefined,
+								)
+							: undefined,
 					reportState: navigationOnly
 						? {
 								sections: state.draft.sections.map((s) => s.title),
@@ -668,18 +687,44 @@ export class DeliverableEngine {
 				state.sequence++;
 				try {
 					const raw = JSON.parse(r.text);
+					if (navigationOnly && raw.draft != null)
+						throw Error("NAVIGATION_REQUIRES_NULL_DRAFT");
 					const parsed = sectionUpdate
 						? (() => {
 								const value = deliverableSectionStepSchema.parse(raw);
 								return {
 									draft: applySectionUpdate(state.draft, value.update),
 									next: value.next,
+									incomingDiscovery: value.update.worldModelDiscovery,
 								};
 							})()
-						: deliverableStepSchema.parse(raw);
+						: (() => {
+								const value = deliverableStepSchema.parse(raw);
+								return {
+									draft: value.draft,
+									next: value.next,
+									incomingDiscovery: value.draft?.worldModelDiscovery,
+								};
+							})();
 					if (content && parsed.draft === null)
 						throw Error("READ_CONTENT_REQUIRES_DRAFT_UPDATE");
-					const output = { ...parsed, draft: parsed.draft ?? state.draft };
+					if (!worldModelDiscoveryEnabled && parsed.incomingDiscovery != null)
+						throw Error("DISCOVERY_DISABLED");
+					const retained = parsed.draft ?? state.draft;
+					const discovery = applyDiscoveryUpdate({
+						enabled: worldModelDiscoveryEnabled,
+						hasNewContent: !!content,
+						previous: state.draft.worldModelDiscovery ?? undefined,
+						incoming: parsed.incomingDiscovery,
+						openQuestions: retained.openQuestions,
+					});
+					const output = {
+						...parsed,
+						draft: normalizeDraft({
+							...retained,
+							worldModelDiscovery: discovery,
+						}),
+					};
 					if (recoveryExhausted && output.next.kind !== "finish")
 						throw Error("RECOVERY_LIMIT_FINISH_REQUIRED");
 					const result = materialize(
@@ -689,10 +734,7 @@ export class DeliverableEngine {
 						state.version + 1,
 						job.topic,
 					);
-					// Source quotes must come from ranges actually delivered, not merely fetched text.
-					for (const e of result.evidence)
-						if (e.end > (state.cursors[e.snapshotId] ?? 0))
-							throw Error("CITATION_NOT_READ");
+					assertCitationsRead(result.evidence, state.cursors);
 					if (output.next.kind === "fetch") {
 						const url = canonicalUrl(output.next.url);
 						const candidate = {
@@ -836,6 +878,15 @@ export class DeliverableEngine {
 								0,
 							),
 							knowledge: output.draft.knowledge.length,
+							discoveryCandidates:
+								output.draft.worldModelDiscovery?.candidates.length ?? 0,
+							discoveryGaps: output.draft.worldModelDiscovery
+								? output.draft.worldModelDiscovery.gaps.length +
+									output.draft.worldModelDiscovery.candidates.reduce(
+										(n, candidate) => n + candidate.gaps.length,
+										0,
+									)
+								: 0,
 						});
 					});
 					return;
@@ -902,6 +953,7 @@ export class DeliverableEngine {
 					state.version + 1,
 					job.topic,
 				);
+				assertCitationsRead(result.evidence, state.cursors);
 				state.version++;
 				job = must(this.store.getJob(job.id));
 				save(() => {
@@ -1023,4 +1075,33 @@ export class DeliverableEngine {
 			this.store.put(job.id, "candidate", c.id, c);
 		return memory as MemoryBundle;
 	}
+}
+
+function assertCitationsRead(
+	evidence: { snapshotId: string; end: number }[],
+	cursors: Record<string, number>,
+) {
+	for (const item of evidence)
+		if (item.end > (cursors[item.snapshotId] ?? 0))
+			throw Error("CITATION_NOT_READ");
+}
+
+function applyDiscoveryUpdate(options: {
+	enabled: boolean;
+	hasNewContent: boolean;
+	previous: DiscoveryInput | undefined;
+	incoming: DiscoveryInput | null | undefined;
+	openQuestions: string[];
+}) {
+	if (!options.enabled) {
+		if (options.incoming != null) throw Error("DISCOVERY_DISABLED");
+		return options.previous;
+	}
+	if (options.hasNewContent && !options.previous && options.incoming == null)
+		throw Error("DISCOVERY_INITIAL_RESULT_REQUIRED");
+	const merged = mergeDiscovery(options.previous, options.incoming);
+	for (const gap of requiredDiscoveryGaps(merged))
+		if (!options.openQuestions.includes(gap.question))
+			throw Error("DISCOVERY_REQUIRED_GAP_NOT_IN_OPEN_QUESTIONS");
+	return merged;
 }

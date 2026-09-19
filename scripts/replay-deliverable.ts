@@ -42,6 +42,7 @@ if (sectionUpdate) {
 	input.knowledgeState = previous.knowledge;
 	input.limitationsState = previous.limitations;
 	input.openQuestionsState = previous.openQuestions;
+	input.worldModelDiscoveryState = previous.worldModelDiscovery;
 	delete input.draft;
 }
 

@@ -278,6 +278,7 @@ test("research deletion requires confirmation and clears the selected report", a
 		name: `${topic}を削除`,
 		exact: true,
 	});
+	await page.locator(".job-row").filter({ hasText: topic }).hover();
 	await remove.click();
 	const modal = page.getByRole("dialog", {
 		name: "この調査を完全に削除しますか？",
