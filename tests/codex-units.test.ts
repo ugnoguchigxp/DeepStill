@@ -371,6 +371,7 @@ test("enabled discovery system context states empty-definition and correlation l
 	expect(reading).toContain("correlates_with");
 	expect(reading).toContain("cannot be assessment=supported");
 	expect(reading).toContain("relevance=required");
+	expect(reading).toContain("Default every gap to optional");
 	const navigation = prompt(
 		"deliverable_step",
 		JSON.stringify({
