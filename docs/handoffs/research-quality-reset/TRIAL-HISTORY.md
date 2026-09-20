@@ -1,6 +1,6 @@
 # 探索品質改善トライアル履歴
 
-最終更新: 2026-09-17
+最終更新: 2026-09-20
 
 この文書は、探索品質を改善するために何を試し、何が実際に変わり、なぜ採用または不採用になったかを辿るための索引である。点数だけで候補を並べず、正常完了、内容の正確さ、費用、変更分岐への到達、外部条件を含めて判断する。
 
@@ -43,6 +43,7 @@
 |2026-09-16|U3: 節単位更新|新資料と無関係な既存節をコード側で保持する|固定再生は保持0→80%、節脱落1→0、出力4,175→2,760。liveは対象分岐へ1回到達したが全3節を明示置換し、両方partial|採用保留。コードはフラグ配下に残すが既定無効|候補 `ff7b9c2`、保存ブランチ `codex/experiment-structural-u3-20260916`、詳細 `experiments/STRUCTURAL-20260916.md`|
 |2026-09-17|Q1: 初回queryをLLMで計画|短い原依頼を、中心語を保った検索向けqueryへ整える|DuckDBは高密度な公式ページへ改善。可逆圧縮は同じ資料のまま入力+19.2%。local llmは公式資料が増えたが入力+156.0%、要求+143.5%、本文-13.9%、`invalid_deliverable`|不採用。mainへ未導入|候補 `cdf7ad9`、保存ブランチ `codex/experiment-search-q1-20260917`、詳細 `experiments/SEARCH-QUALITY-Q1-20260917.md`|
 |2026-09-17|U1: 候補IDと密度・一次性・重複予測によるURL選択|実行可能な候補を比較し、高密度・一次・非重複URLを優先する|local llmは正常完了・本文+94.9%・入力-26.2%。DuckDBは入力-1.6%だが本文-36.3%、段落-33.3%、Knowledge 4→3。13 fetch中12件を `new_question` と自己評価し重複判定が機能せず|不採用|候補 `c282f6f`、結果 `a9fbdfb`、revert `01606c6`、保存ブランチ `codex/experiment-search-url-u1-20260917`、詳細 `experiments/SEARCH-URL-SELECTION-U1-20260917.md`|
+|2026-09-20|WM-SC: 発見指示の定義空結果・相関ロック・required gap|luna/lowでワールドモデル候補がlive生成されるかを確認する|可逆圧縮は定義本文から候補0の空結果。DeepSeekは候補1〜3件を生成し相関を因果へ上げなかった。required gap未コピーで partial。2件は検索timeoutで未到達|暫定保持。発見指示はmainに残す。80点評価ではない|`65f1f99`、保存ブランチ `codex/experiment-wm-sc-20260920`、詳細 `experiments/WORLD-MODEL-SC-20260920.md`|
 
 ## 主なlive実行ID
 
@@ -74,6 +75,11 @@
 |U1 / local llm|`0802847d-585d-489f-bc4c-82e794fb126f`|`684ac48a-8b25-44e7-9eae-0a6e2cd87ecb`|候補は正常完了、入力-26.2%、本文+94.9%。類似記事をすべて新規扱い|
 |U1 / 可逆圧縮|`c2143415-5b59-4912-8add-6e2893e6c72c`|`67ffeb7e-4174-45a8-884c-ebbebcf36201`|候補は正常完了。基準は深掘り後の外部LLM abortで比較不能|
 |U1 / duck db|`57820cf5-9f08-48dd-875d-a9660824c0d7`|`b32bdcc2-4704-4c71-a533-be73abe81322`|共通検索結果8件。候補は要求減だが公式範囲・本文・Knowledgeが後退|
+|WM-SC T1 / DeepSeek flash 4.1|—|`5ca4d1ac-82b8-40bf-8d28-7fd4c44c39e6`|v1。候補1件、required gapでpartial|
+|WM-SC T2 / 可逆圧縮|—|`501032f4-2e79-4b24-9657-a18822c62688`|v1。検索timeout、発見未到達|
+|WM-SC T3 / DeepSeek flash 4.1|—|`0ded7e57-23ae-4e82-a5a3-e4f9876ebb67`|v2。候補3件。発見結果としては最良|
+|WM-SC T4 / 可逆圧縮|—|`0489c21b-e353-419e-aa99-6310596954e3`|v2。正常完了、定義から空候補|
+|WM-SC T5 / DeepSeek flash 4.1|—|`27d3376c-a333-4d85-aee9-93c6c186068c`|v3。検索timeout、v3未確認|
 
 ## 現在のコードに残ったもの
 
